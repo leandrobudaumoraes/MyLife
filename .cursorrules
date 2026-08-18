@@ -1,0 +1,59 @@
+# Life OS — regras de contexto
+
+Este repositório é o **Life OS** do Leandro: um sistema multi-agentes (MAS) em **Node.js** e **TypeScript** (Linux Debian) que orquestra Todoist, Notion e Google Calendar. Fonte da verdade de comportamento: `/docs/specs`. Implementação segue Spec-Driven Development — **não inventar código que a spec não autoriza**.
+
+## Stack e arquitetura
+
+- Runtime: Node.js ≥ 20, ESM (`"type": "module"`), TypeScript `strict`.
+- Orquestração de agentes: LangChain + LangGraph.
+- Integrações: `@doist/todoist-sdk`, `@notionhq/client`, `googleapis`.
+- Composição: **injeção de dependência** (Inversify). Domínio não importa SDKs.
+- Princípios **SOLID**. Portas (interfaces) no domínio; adaptadores nas bordas.
+- Sem `any`. Erros tipados. Sem efeitos colaterais fora dos adaptadores.
+
+## Spec-Driven Development (SDD)
+
+1. Contrato vive em `/docs/specs`. Código implementa o contrato.
+2. Mudança de regra de negócio → atualizar a spec **antes** do código.
+3. Cada módulo novo começa pela spec (interfaces TypeScript + regras + diagrama).
+4. Não implementar o que a spec marca como fora de escopo.
+
+## Camadas GTD / PARA / Kanban
+
+| Camada | Ferramenta | Entra | Não entra |
+|---|---|---|---|
+| Relógio | Google Calendar | Compromisso com hora + cue (1 linha) + URL da spec | Conduta, cápsula, 90/5 |
+| Ação | Todoist | Ação física que se completa | Uma tarefa por cápsula; uma por tipo de oficina |
+| Plano | Notion | Spec do bloco, Kanban, hubs PARA | Execução das 06:00 (Watch não abre Notion) |
+
+TDAH: menos ruído. Não criar evento, tarefa ou página “para controle”.
+
+## Cinco frentes de domínio (agentes especialistas)
+
+| Frente | Agente | Pilar no vault | Prefixo Calendar |
+|---|---|---|---|
+| Mim (Saúde / Vitalidade) | Pessoal | Vitalidade e Longevidade | `SAUDE` |
+| Casa (Finanças / Manutenção) | Infraestrutura Casa | Lar e Prosperidade | `LAR` |
+| Instituto (Gestão) | Profissional Instituto | Instituto Metatron | `INSTITUTO` |
+| Loja Lua Branca (E-commerce) | Operações Loja Lua Branca | Loja da Caroline | `LOJA` |
+| Família (Suporte) | Logística Familiar | Pai e Esposo | `FAMILIA` |
+
+PagBank / Engenharia **não** é agente. É **restrição de relógio** (`ENGENHARIA`, 09:00–12:00 e 13:00–18:00). O Mestre não sobrescreve esses blocos.
+
+## Regras invioláveis
+
+- Fuso: `America/Sao_Paulo`. Não acordar o humano antes das 06:00.
+- Almoço 12:00–13:00 é intervalo. PagBank off.
+- Exceção (Smile, plantão, rito) = apagar **ocorrência**. Série permanece.
+- Loja: **um** item na quinta 18:00–19:00. Sem segundo bloco.
+- Instituto operacional: sábado 09:00–12:00, **uma** entrega. Rito só no Calendar Instituto.
+- Cue no Calendar é autossuficiente de manhã (Watch). Notion não abre às 06:00.
+- Não copiar protocolo clínico para o Calendar. Não criar `.obsidian`.
+
+## Implementação
+
+- Hexágono: `src/core` (domínio + portas) → `src/adapters` → `src/agents` → `src/jobs`.
+- Cada adaptador implementa uma porta. Testes mockam portas, não HTTP.
+- Prompts de sistema dos especialistas: contrato em `03-specialist-agents.md`.
+- CRON do Mestre: contrato em `02-master-agent-orchestrator.md`.
+- Idioma do produto e das specs: português (Brasil). Identificadores de código: inglês.
