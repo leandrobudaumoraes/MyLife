@@ -1,10 +1,12 @@
 # 01 — Integrações de API (portas e adaptadores)
 
-**Status:** contrato v0.1 (SDD)  
+**Status:** contrato v0.1 (SDD) · portas e adaptadores em `src/`; LLM e relógio ainda sem porta  
 **Depende de:** [00-architecture-overview.md](./00-architecture-overview.md)  
 **Princípio:** o domínio **nunca** importa SDK de fornecedor. Cada API tem uma porta, um adaptador, DTOs próprios e erros tipados.
 
-Este spec define o isolamento estrito de Todoist, Notion e Google Calendar. LangChain/OpenAI tem porta à parte (`ILlmPort`) porque o Mestre e os especialistas consomem LLM sem conhecer o provider.
+Este spec define o isolamento estrito de Todoist, Notion e Google Calendar. LangChain/OpenAI **deveria** ter porta (`ILlmPort`); hoje o grafo instancia `ChatOpenAI` em `LifeOsGraph.ts`. `IClock` está no token Inversify e **não tem** adaptador — datas usam `Intl` no próprio grafo.
+
+Adaptadores reais: `src/adapters/apis/{Todoist,Notion,Calendar}Adapter.ts`.
 
 ---
 
@@ -16,33 +18,29 @@ flowchart TB
     ITodoistPort
     INotionPort
     IGoogleCalendarPort
-    ILlmPort
-    IClock
   end
 
-  subgraph Adapters["src/adapters"]
+  subgraph Adapters["src/adapters/apis"]
     TodoistAdapter["TodoistAdapter<br/>@doist/todoist-sdk"]
     NotionAdapter["NotionAdapter<br/>@notionhq/client"]
-    GCalAdapter["GoogleCalendarAdapter<br/>googleapis + google-auth-library"]
-    LlmAdapter["OpenAiLlmAdapter<br/>@langchain/openai"]
-    SystemClock["SystemClock"]
+    GCalAdapter["CalendarAdapter<br/>googleapis + google-auth-library"]
   end
 
   ITodoistPort --> TodoistAdapter
   INotionPort --> NotionAdapter
   IGoogleCalendarPort --> GCalAdapter
-  ILlmPort --> LlmAdapter
-  IClock --> SystemClock
 ```
+
+Tokens `ILlmPort` e `IClock` existem em `tokens.ts` **sem binding** e sem pasta de adaptador.
 
 Regras:
 
-1. `import "@doist/todoist-sdk"` só em `src/adapters/todoist/**`.
-2. `import "@notionhq/client"` só em `src/adapters/notion/**`.
-3. `import "googleapis"` / `google-auth-library` só em `src/adapters/google-calendar/**`.
-4. Adaptador traduz SDK → tipos do kernel (`GtdAction`, `CalendarEventRef`, …). Nunca vaza `Task`, `PageObjectResponse`, `calendar_v3.Schema$Event` para agentes.
+1. `import "@doist/todoist-sdk"` só em `src/adapters/apis/TodoistAdapter.ts`.
+2. `import "@notionhq/client"` só em `src/adapters/apis/NotionAdapter.ts`.
+3. `import "googleapis"` / `google-auth-library` só em `src/adapters/apis/CalendarAdapter.ts`.
+4. Adaptador traduz SDK → tipos do kernel (`GtdAction`, `CalendarEventRef`, …). Nunca vaza `Task`, `PageObjectResponse`, `calendar_v3.Schema$Event` para o Mestre.
 5. Toda chamada externa tem timeout, retry com backoff e mapeamento de 429/5xx para `IntegrationError`.
-6. Idempotência é responsabilidade do adaptador de Calendar (chave `lifeOsKey`) e do adaptador Notion (página do dia indexada por data).
+6. Idempotência é responsabilidade do adaptador de Calendar (chave `lifeOsKey`). Daily Plan Notion ainda é mapa em memória indexado por `date` — não há página no workspace.
 
 ---
 
@@ -108,7 +106,7 @@ export interface ProtectedSeriesCatalog {
 }
 ```
 
-`IClock` é injetável para testes. Produção usa `America/Sao_Paulo`. `weekday`: 0 = domingo.
+`IClock` é o contrato para testes. **Não há** classe `SystemClock` no `src/`. `LifeOsGraph` formata `America/Sao_Paulo` com `Intl`. `weekday`: 0 = domingo.
 
 ---
 
@@ -235,7 +233,9 @@ Specs ativas (11). Academia Ultra é **uma** spec, três séries.
 
 Template de spec (somente leitura no CRON): Callout · Agora · Não · Se... Cue de manhã autossuficiente no Watch.
 
-Kanban do dia: **uma** página `Daily Plan YYYY-MM-DD` filha do hub ou de um banco dedicado futuro. v0.1: o adaptador cria/atualiza essa página; **não** cria segundo banco de specs.
+Kanban do dia: contrato = uma página `Daily Plan YYYY-MM-DD`. **Implementação:** `listKanban`, `applyKanbanMoves` e `upsertDailyPlan` usam `Map` em memória no `NotionAdapter`. Não criam banco nem página.
+
+`listActiveSpecs` no código: resolve `NOTION_PROJECTS_DB_ID` → `data_source_id` (API Notion v5) e filtra propriedade nativa `Status = Em andamento`. O mapeamento `toSpecRow` ainda espera propriedades de spec (`Nome`, `Pilar`, `Prefixo`, `Slot`, `IDs Calendar`, `Cue`, `Status` select `ativo` | `rascunho`). Linha que não casa esse shape é descartada.
 
 ### 5.2 Contrato da porta
 
@@ -457,13 +457,15 @@ Busca no upsert: `privateExtendedProperty=lifeOsKey=...` no dia. Se existir, `pa
 
 ### 6.6 Auth Google
 
-Ordem:
+O `CalendarAdapter` exige o trio OAuth no ambiente (falha no construtor se faltar alguma):
 
-1. `GOOGLE_APPLICATION_CREDENTIALS` (service account) — só se o calendário estiver compartilhado com o SA.
-2. OAuth instalado: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REFRESH_TOKEN`.
-3. Escopos mínimos: `https://www.googleapis.com/auth/calendar.events` e `calendar.readonly` no Instituto.
+1. `GOOGLE_CLIENT_ID`
+2. `GOOGLE_CLIENT_SECRET`
+3. `GOOGLE_REFRESH_TOKEN`
 
-Sem escopo Gmail. Sem Drive. Sem Contacts.
+`GOOGLE_CALENDAR_ID` (default `primary`) e `GOOGLE_CALENDAR_INSTITUTO_ID` vêm do `IntegrationConfig` (Inversify). Service account (`GOOGLE_APPLICATION_CREDENTIALS`) e os nomes `GOOGLE_OAUTH_*` da versão anterior deste spec **não são lidos**.
+
+Escopos usados na prática: Calendar API v3 via OAuth2 (`events.list` / `insert` / `update` / `delete` / `get`). Sem escopo Gmail, Drive ou Contacts.
 
 ### 6.7 Fora de escopo Calendar
 
@@ -497,10 +499,10 @@ export interface ILlmPort {
 }
 ```
 
-- Provider default: OpenAI via `@langchain/openai`.
-- `temperature: 0`. Sem tools de busca web.
-- Saída **sempre** validada com Zod no agente (não no adaptador).
-- Falha de parse → `validation`, o especialista devolve `uncovered: true` e zero propostas.
+- Provider no código: OpenAI via `ChatOpenAI` (`@langchain/openai`) **dentro** de `LifeOsGraph`, não via `ILlmPort`.
+- Modelo: `OPENAI_MODEL` ou default `gpt-4o-mini`. `temperature: 0`. Sem tools de busca web.
+- Saída **sempre** validada com Zod no grafo.
+- Falha de parse → o especialista devolve `uncovered: true` e zero propostas.
 
 ---
 
@@ -514,10 +516,11 @@ export const TOKENS = {
   GoogleCalendar: Symbol.for("IGoogleCalendarPort"),
   Llm: Symbol.for("ILlmPort"),
   ProtectedSeries: Symbol.for("ProtectedSeriesCatalog"),
+  Config: Symbol.for("IntegrationConfig"),
 } as const;
 ```
 
-Binding: `ContainerModule` por adaptador. Testes rebindam para fakes em memória.
+Binding atual (`inversify.config.ts`): `Config`, `ProtectedSeries`, `Todoist`, `Notion`, `GoogleCalendar`, `MasterAgent`. `Clock` e `Llm` **não são bound**. Testes ainda não rebindam fakes (não há suíte no repo).
 
 ---
 
@@ -541,9 +544,9 @@ Sem payload de evento, sem título de tarefa clínica completa se houver dose no
 
 ## 10. Critério de aceite desta spec
 
-1. Compilar o núcleo sem `googleapis` / `@notionhq` / `@doist/todoist-sdk` no grafo de `src/core` e `src/agents`.
+1. Compilar o núcleo sem `googleapis` / `@notionhq` / `@doist/todoist-sdk` no grafo de `src/core` (o grafo ainda importa `@langchain/openai` — gap).
 2. Tentativa de `patch` em série protegida retorna `forbidden_write` sem chamar a API.
 3. Dois `upsertFlexEvent` com o mesmo `lifeOsKey` no mesmo dia = um evento.
 4. `listActions({ front: "mim" })` não devolve tarefas de `familia` / `lar` / `instituto`.
-5. Notion `upsertDailyPlan` duas vezes no mesmo `date` atualiza a mesma página.
+5. Notion `upsertDailyPlan` duas vezes no mesmo `date` atualiza a mesma entrada **em memória** (ainda não é página Notion).
 6. LLM fora do schema Zod não gera write em nenhuma API.

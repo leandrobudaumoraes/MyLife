@@ -1,11 +1,13 @@
 # 03 — Agentes especialistas (cinco frentes)
 
-**Status:** contrato v0.1 (SDD)  
+**Status:** contrato v0.1 (SDD) · prompts em `specialist-prompts.ts`; sem classes Inversify por agente  
 **Depende de:** [00-architecture-overview.md](./00-architecture-overview.md), [01-api-integrations.md](./01-api-integrations.md), [02-master-agent-orchestrator.md](./02-master-agent-orchestrator.md)
 
-Cinco agentes, cinco frentes, um contrato comum. Cada um lê **só** o seu recorte de Todoist + Notion, devolve `SpecialistOutput`, e **nunca** escreve Calendar. O Mestre filtra frente alheia; este spec define o que cada um está autorizado a ver e a propor.
+Cinco agentes, cinco frentes, um contrato comum. Cada um lê **só** o seu recorte de Todoist + Notion (já filtrado no prompt), devolve `SpecialistOutput`, e **nunca** escreve Calendar. O Mestre filtra frente alheia (`assertOwnFront`); este spec define o que cada um está autorizado a ver e a propor.
 
-PagBank / Engenharia **não** tem especialista. Lab IA quarta 13:00–14:30 é seção da série de engenharia, fora deste arquivo.
+**No código:** não há `src/agents/specialists`. O nó `specialist` de `LifeOsGraph` chama `runSpecialist` para cada id em `SPECIALIST_ORDER`, com o system prompt de `SPECIALIST_SYSTEM_PROMPTS`. Binding `AGENT_TOKENS` **não existe** no container.
+
+PagBank / Engenharia **não** tem especialista. Lab IA quarta 13:00–14:30 é seção da série de engenharia, fora deste arquivo. Inbox PagBank cai em `ignore_pagbank` no nó `triage`.
 
 ---
 
@@ -45,15 +47,17 @@ export const SPECIALIST_MAX_FLEX_ACCEPTED_BY_MASTER_PER_FRONT = 1;
 
 ### 1.3 Ferramentas (tools) permitidas ao LLM do especialista
 
+Contrato (quando houver tool-calling):
+
 | Tool | Porta | Read/Write |
 |---|---|---|
 | `list_actions` | `ITodoistPort.listActions({ front })` | read |
 | `list_specs` | `INotionPort.listActiveSpecs(front)` | read |
 | `list_kanban` | `INotionPort.listKanban(date, front)` | read |
 
-Sem tool de Calendar. Sem web. Sem `complete()`. O Mestre já injetou `occupied` e `gaps`; o LLM não relê o relógio.
+**Implementação:** o LLM do especialista **não** tem tools. O Mestre já injetou `ACTIONS`, `SPECS`, `KANBAN`, `OCCUPIED` e `GAPS` no user prompt. Sem Calendar, sem web, sem `complete()`.
 
-Saída estruturada: `SpecialistOutput` via Zod. `temperature: 0`.
+Saída estruturada: `SpecialistDraft` (Zod no grafo) → `SpecialistOutput`. `temperature: 0`.
 
 ### 1.4 Regras comuns (colar em todos os system prompts)
 
@@ -68,6 +72,7 @@ Regras comuns do Life OS:
 - prefix obrigatório da sua frente. Nunca ENGENHARIA.
 - Plantão: não sugerir Zone 2 nem Ultra da noite seguinte; escola 07:15 permanece.
 - Dia de rito (sábado): oficina cede; você não inventa substituto.
+- Trabalho PagBank / engenharia / bug de produção NÃO é sua frente. Ignore.
 ```
 
 ### 1.5 Diagrama de escopo
@@ -151,6 +156,8 @@ Você é o Agente Pessoal do Life OS do Leandro (frente Mim — Saúde e Vitalid
 
 Missão: garantir que o corpo tenha sono 22:00–06:00, Zone 2 depois da escola, Ultra 3× (ter/qui 20:00 e dom 07:50) e que as ações físicas do Todoist Vitalidade apareçam em Hoje. Você não é médico. Você não muda dose. Você não cria evento de suplemento.
 
+Se a Inbox trouxer treino de musculação na M3Gym: esse é o treino Ultra. Garanta o bloco (flex alinhado a ter/qui 20:00–21:15 ou domingo 07:50) ou promova a tarefa para Hoje. Não crie segunda academia. Não proponha 06:00–08:20.
+
 Grade que você NÃO mexe (já protegida):
 - Sono 22:00 série 4shfgjsrs1t9t6pljm8ake8ng0
 - Zone 2 07:50–08:20 u7bka3nff46blrfphjc52pfiq0
@@ -161,7 +168,7 @@ Ações Todoist típicas (promover, não clonar): Ao acordar; Café/bloco 03; Vi
 
 {regras comuns}
 
-Saída: SpecialistOutput JSON. proposals quase sempre []. uncovered só se faltar Zone 2 (dia útil sem plantão) ou Ultra (ter/qui/dom sem plantão/dor).
+Saída: SpecialistOutput JSON. proposals quase sempre [] salvo treino físico que precise de hora. uncovered só se faltar Zone 2 (dia útil sem plantão) ou Ultra (ter/qui/dom sem plantão/dor).
 ```
 
 **User (template):**
@@ -228,6 +235,8 @@ Tese: o dinheiro do lar existe para a família usufruir sem se prejudicar. O age
 Você é o Agente de Infraestrutura da Casa do Life OS do Leandro (frente Casa — Finanças e Manutenção).
 
 Missão: tirar do inbox GTD do projeto 🏠 Lar a próxima ação física que segura o lar (pagar, consertar, comprar saindo). Encaixar no sábado à tarde se precisar de rua. Não virar CFO. Não abrir planilha. Não criar série LAR.
+
+Compras de alimento da semana (abacate, linhaça, cacau) são ação de rua/compra: um flex no sábado depois das 12:00 (60–120 min) se o DATE for sábado; em dia útil prefira promover para Hoje e NÃO timeblockar 09:00–18:00.
 
 Proibido: 09:00–18:00 dia útil (PagBank + almoço), 06:00–08:20, 18:00–20:00, 22:00–06:00, quinta 18:00 (Loja), ter/qui 20:00 (Ultra).
 
@@ -350,11 +359,11 @@ Você é o Agente de Operações da Loja Lua Branca no Life OS do Leandro.
 
 Missão: na quinta 18:00–19:00, com Caroline, UM item (organizar, vender, propaganda). O horário já existe (série 81hfsp06qj4s52nkr2r1lpj5nk). Você NÃO cria evento. Você NÃO cria projeto Todoist.
 
-Escolha no máximo um card/item do hub/Kanban. Título curto. Sem segundo item "se der tempo".
+Se a Inbox trouxer organização de evento público da Caroline: esse é o item da semana (Kanban/Daily Plan), não um segundo bloco. Título curto. Sem segundo item "se der tempo".
 
 Ultra 20:00 da quinta é intocável. Família do resto da semana não é loja.
 
-Fora de quinta: vazio, uncovered false.
+Fora de quinta: vazio, uncovered false — o item fica no Kanban para a próxima quinta.
 
 {regras comuns}
 
@@ -434,6 +443,8 @@ Cues de manhã autossuficientes no Watch. Nunca "abrir Notion".
 
 Tickler do projeto 👨 Família: promover Hoje se for ação física (ligar, levar, assinar). Não timeblockar ligar de 5 minutos.
 
+Evento da Caroline na Loja não é o seu flex. Se receber esse item, devolva proposals [] e um warning apontando Loja.
+
 {regras comuns}
 
 uncovered: true se dia útil sem Escola Inovação no occupied.
@@ -499,6 +510,8 @@ Pós-parse no código (não no LLM):
 
 ## 9. Inversify — binding dos especialistas
 
+Contrato (quando os agentes forem classes):
+
 ```typescript
 export const AGENT_TOKENS = {
   Pessoal: Symbol.for("Agent.Pessoal"),
@@ -510,7 +523,7 @@ export const AGENT_TOKENS = {
 } as const;
 ```
 
-`AllSpecialists` = array ordenado estável:
+**Implementação:** esses tokens **não estão** no container. Os cinco system prompts vivem em `SPECIALIST_SYSTEM_PROMPTS`. A ordem do fan-out paralelo é:
 
 ```typescript
 export const SPECIALIST_ORDER: readonly Exclude<AgentId, "mestre">[] = [
@@ -522,7 +535,7 @@ export const SPECIALIST_ORDER: readonly Exclude<AgentId, "mestre">[] = [
 ];
 ```
 
-A ordem do fan-out é paralela; o array só define desempate documental e logs.
+Há ainda o prompt de triagem (`TRIAGE_SYSTEM_PROMPT`) no Mestre: Inbox → um dos cinco **ou** `ignore_pagbank`. Não é um sexto especialista.
 
 ---
 
@@ -543,8 +556,8 @@ A ordem do fan-out é paralela; o array só define desempate documental e logs.
 
 ## 11. Critério de aceite desta spec
 
-1. Cinco classes/serviços, um `front` cada, tools só de leitura da própria frente.
-2. Instituto e Loja com `proposals: []` nos testes de contrato.
+1. Cinco system prompts, um `front` cada, recorte só da própria frente no prompt (sem tools LangChain ainda).
+2. Instituto e Loja com `proposals: []` nos testes de contrato. *(O `builder` rejeita flex dessas frentes mesmo se o LLM propuser.)*
 3. Pessoal promove «Ao acordar» em dia útil e não cria flex 06:00.
 4. Casa só propõe flex com `start ≥ sábado 12:00` quando weekday = sábado.
 5. Família marca `uncovered` se escola ausente em dia útil.

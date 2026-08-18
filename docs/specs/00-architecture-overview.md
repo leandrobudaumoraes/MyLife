@@ -1,11 +1,11 @@
 # 00 — Visão geral da arquitetura (Life OS)
 
-**Status:** contrato v0.1 (SDD)  
-**Runtime:** Node.js ≥ 20 · TypeScript strict · Linux Debian  
+**Status:** contrato v0.1 (SDD) · implementação parcial em `src/`  
+**Runtime:** Node.js ≥ 20 · TypeScript `strict` · Linux Debian  
 **Fuso:** `America/Sao_Paulo`  
 **Pessoa:** Leandro Budau Moraes  
 
-Este documento é a **fonte da verdade** do sistema. Os demais specs especializam portas, o Agente Mestre e os cinco especialistas. Nenhuma implementação pode contradizer este arquivo.
+Este documento é a **fonte da verdade** das regras. Os demais specs especializam portas, o Agente Mestre e os cinco especialistas. Nenhuma implementação pode contradizer as regras daqui. O mapa do que já existe no código está em [readme.md](./readme.md); o ciclo de uma corrida, em [Funcionalidade.md](./Funcionalidade.md).
 
 ---
 
@@ -141,13 +141,14 @@ Regras de âncora:
 
 ```mermaid
 flowchart LR
-  subgraph Jobs
-    CronJob
+  subgraph Entry
+    TestRun["src/test-run.ts"]
+    Wrapper["src/run-life.sh"]
   end
 
-  subgraph Agents
+  subgraph Orchestrator["src/core/domain/orchestrator"]
     MasterAgent
-    SpecialistAgents
+    LifeOsGraph
   end
 
   subgraph Core
@@ -155,54 +156,62 @@ flowchart LR
     Ports["Portas"]
   end
 
-  subgraph Adapters
+  subgraph Adapters["src/adapters/apis"]
     TodoistAdapter
     NotionAdapter
     GCalAdapter
-    LlmAdapter
-    ClockAdapter
   end
 
-  CronJob --> MasterAgent
-  MasterAgent --> SpecialistAgents
+  Wrapper --> TestRun
+  TestRun --> MasterAgent
+  MasterAgent --> LifeOsGraph
   MasterAgent --> Ports
-  SpecialistAgents --> Ports
-  Ports --> TodoistAdapter & NotionAdapter & GCalAdapter & LlmAdapter & ClockAdapter
+  Ports --> TodoistAdapter & NotionAdapter & GCalAdapter
 ```
 
-- **Núcleo** (`src/core`): tipos, políticas, portas. Zero SDK, zero HTTP, zero `fs` de credencial.
-- **Adaptadores** (`src/adapters`): únicos pontos que conhecem `@doist/todoist-sdk`, `@notionhq/client`, `googleapis`.
-- **Agentes** (`src/agents`): LangGraph. Recebem portas via Inversify.
-- **Jobs** (`src/jobs`): `node-cron` no fuso `America/Sao_Paulo`.
+- **Núcleo** (`src/core`): tipos, políticas, portas, grafo LangGraph. Zero SDK de Todoist/Notion/Google. O grafo **ainda** instancia `ChatOpenAI` (gap: porta `ILlmPort`).
+- **Adaptadores** (`src/adapters/apis`): únicos pontos que conhecem `@doist/todoist-sdk`, `@notionhq/client`, `googleapis`.
+- **DI** (`src/infrastructure/di`): Inversify liga portas → adaptadores → `MasterAgent`.
+- **Entrada** (`src/test-run.ts`, wrapper `src/run-life.sh`). Pastas `src/agents` e `src/jobs` **não existem**. `node-cron` está no `package.json` e não é importado.
 
-Inversão de dependência: agentes dependem de `ITodoistPort`, nunca de `TodoistApi`.
+Inversão de dependência: o Mestre depende de `TodoistPort` / `ITodoistPort`, nunca de `TodoistApi`.
 
 ---
 
-## 7. Layout de código (alvo — não implementar neste passo)
+## 7. Layout de código (árvore real)
 
 ```
 src/
+  test-run.ts
+  run-life.sh
   core/
-    domain/          # FrontId, TimeBlock, KanbanCard, GtdAction
-    ports/           # ITodoistPort, INotionPort, IGoogleCalendarPort, ILlmPort, IClock
-    policies/        # antiNoise, conflictResolution, protectedSeries
+    domain/
+      schemas.ts
+      catalog.ts
+      result.ts
+      protected-series.ts
+      orchestrator/
+        MasterAgent.ts
+        LifeOsGraph.ts
+        specialist-prompts.ts
+    ports/
+      TodoistPort.ts      # TodoistPort + alias ITodoistPort
+      NotionPort.ts
+      CalendarPort.ts     # CalendarPort + alias IGoogleCalendarPort
+      tokens.ts
+      index.ts
   adapters/
-    todoist/
-    notion/
-    google-calendar/
-    llm/
-    clock/
-  agents/
-    master/
-    specialists/     # pessoal, casa, instituto, loja, familia
-  di/
-    container.ts     # Inversify
-    tokens.ts
-  jobs/
-    daily-orchestrator.cron.ts
-docs/specs/          # este SDD
+    apis/
+      TodoistAdapter.ts
+      NotionAdapter.ts
+      CalendarAdapter.ts
+  infrastructure/
+    di/
+      inversify.config.ts
+docs/specs/
 ```
+
+Ainda não há `src/policies` (políticas vivem em `LifeOsGraph.ts`), `src/agents`, `src/jobs`, adaptador LLM/clock, nem `src/index.ts`. Tokens `ILlmPort` e `IClock` existem em `tokens.ts` sem binding.
 
 ---
 
@@ -285,7 +294,11 @@ export interface TimeRange {
 export interface GtdAction {
   readonly id: string;
   readonly title: string;
-  readonly front: FrontId;
+  /**
+   * Frente PARA. `null` = Inbox ainda sem projeto (ex.: trabalho PagBank
+   * vazado na Inbox — restrição de relógio, não frente do Life OS).
+   */
+  readonly front: FrontId | null;
   readonly project: GtdProject | null;
   readonly list: GtdList;
   readonly due: CivilInstant | null;
@@ -390,10 +403,28 @@ export interface SpecialistOutput {
   readonly warnings: readonly string[];
 }
 
+export interface RejectedProposal {
+  readonly proposal: TimeBlockProposal;
+  readonly reason:
+    | "protected_overlap"
+    | "pagbank_overlap"
+    | "sleep_overlap"
+    | "lunch_overlap"
+    | "noise_cap"
+    | "duplicate_front_flex"
+    | "loja_second_item"
+    | "instituto_second_delivery"
+    | "no_physical_action"
+    | "past_slot"
+    | "schema_invalid";
+}
+
 export interface OrchestratorResult {
   readonly plan: DailyPlan;
   readonly writtenEventIds: readonly string[];
   readonly skipped: readonly string[];
+  readonly rejected: readonly RejectedProposal[];
+  readonly partial: boolean;
 }
 ```
 
@@ -403,10 +434,12 @@ Mapeamento frente → agente → projeto Todoist:
 export const FRONT_CATALOG: Record<
   FrontId,
   {
-    agentId: Exclude<AgentId, "mestre">;
-    prefix: CalendarPrefix;
-    gtdProject: GtdProject | null;
-    colorId: "10" | "6" | "3" | "5" | "4";
+    readonly agentId: Exclude<AgentId, "mestre">;
+    readonly prefix: CalendarPrefix;
+    readonly gtdProject: GtdProject | null;
+    readonly colorId: "10" | "6" | "3" | "5" | "4";
+    readonly hubPageId: string;
+    readonly hubUrl: string;
   }
 > = {
   mim: {
@@ -414,30 +447,40 @@ export const FRONT_CATALOG: Record<
     prefix: "SAUDE",
     gtdProject: "vitalidade",
     colorId: "10",
+    hubPageId: "3bef94d816108193bc0fffd4b33c6107",
+    hubUrl: "https://app.notion.com/p/3bef94d816108193bc0fffd4b33c6107",
   },
   casa: {
     agentId: "infraestrutura_casa",
     prefix: "LAR",
     gtdProject: "lar",
     colorId: "6",
+    hubPageId: "3bef94d81610812ba553f3833971006f",
+    hubUrl: "https://app.notion.com/p/3bef94d81610812ba553f3833971006f",
   },
   instituto: {
     agentId: "profissional_instituto",
     prefix: "INSTITUTO",
     gtdProject: "instituto",
     colorId: "3",
+    hubPageId: "3bef94d816108174811ee64c4ae57fd8",
+    hubUrl: "https://app.notion.com/p/3bef94d816108174811ee64c4ae57fd8",
   },
   loja_lua_branca: {
     agentId: "operacoes_loja_lua_branca",
     prefix: "LOJA",
     gtdProject: null,
     colorId: "5",
+    hubPageId: "3bef94d816108148851bc1d07a2c1c8d",
+    hubUrl: "https://app.notion.com/p/3bef94d816108148851bc1d07a2c1c8d",
   },
   familia: {
     agentId: "logistica_familiar",
     prefix: "FAMILIA",
     gtdProject: "familia",
     colorId: "4",
+    hubPageId: "3bef94d816108192988ffcc41260455a",
+    hubUrl: "https://app.notion.com/p/3bef94d816108192988ffcc41260455a",
   },
 };
 ```
@@ -473,6 +516,8 @@ sequenceDiagram
 ```
 
 Idempotência: o Mestre usa `extendedProperties.private.lifeOsKey` no evento. Reexecução no mesmo dia atualiza o mesmo bloco flex; não duplica.
+
+**Implementação atual do grafo:** três nós — `triage` → `specialist` → `builder` — em `LifeOsGraph.ts`. O Mestre carrega as portas **antes** do grafo. Ocupado vem de `listProtectedOccurrences`, não de `listBusy`. `deleteOccurrence` não é chamado. Persistência Notion de Daily Plan/Kanban é em memória. Detalhe em [Funcionalidade.md](./Funcionalidade.md) e spec 02.
 
 ---
 
@@ -522,26 +567,29 @@ Notion:
 
 ## 12. Segurança e configuração
 
-Variáveis de ambiente (nunca commitadas):
+Variáveis que o código lê hoje (nunca commitadas; ver `.env.example`):
 
 | Variável | Uso |
 |---|---|
 | `TODOIST_API_TOKEN` | REST Todoist |
 | `NOTION_API_KEY` | Integração Notion |
+| `NOTION_PROJECTS_DB_ID` | Banco queryado por `listActiveSpecs` |
 | `GOOGLE_CALENDAR_ID` | Calendário Gmail (`primary` se omitido) |
 | `GOOGLE_CALENDAR_INSTITUTO_ID` | Calendário de rito |
-| `GOOGLE_APPLICATION_CREDENTIALS` ou trio OAuth | Auth Google |
-| `OPENAI_API_KEY` | LLM dos agentes |
-| `LIFE_OS_TZ` | Default `America/Sao_Paulo` |
-| `LIFE_OS_CRON` | Default `20 5 * * *` |
+| `GOOGLE_CLIENT_ID` | OAuth Google |
+| `GOOGLE_CLIENT_SECRET` | OAuth Google |
+| `GOOGLE_REFRESH_TOKEN` | OAuth Google |
+| `OPENAI_API_KEY` | LLM do grafo (`ChatOpenAI` em `LifeOsGraph`) |
+| `OPENAI_MODEL` | Opcional; default `gpt-4o-mini` |
 
-Segredos não entram em log. Adaptadores mascaram tokens.
+Contrato ainda **não lido** pelo `src/`: `LIFE_OS_TZ`, `LIFE_OS_CRON`, `LIFE_OS_PLANTAO`, `GOOGLE_APPLICATION_CREDENTIALS`, `GOOGLE_OAUTH_*`. Fuso está hardcoded (`America/Sao_Paulo`). CRON é o wrapper `src/run-life.sh`, sem `node-cron`.
+
+Segredos não entram em log. Adaptadores não imprimem tokens.
 
 ---
 
 ## 13. Fora de escopo (v0.1)
 
-- Implementação neste passo (só SDD + setup).
 - Sexto agente de Engenharia / PagBank / carreira.
 - Write no vault Obsidian, criação de `.obsidian`, biomarcadores.
 - Automação Make / Zapier (o MAS **substitui** orquestração futura, não o token local).
@@ -554,11 +602,11 @@ Segredos não entram em log. Adaptadores mascaram tokens.
 
 ## 14. Critério de aceite desta spec
 
-A implementação futura está correta se, num dia útil sem plantão:
+A implementação está correta se, num dia útil sem plantão:
 
 1. As 13 séries protegidas permanecem intactas (sem `PATCH` de série).
 2. PagBank 09:00–12:00 e 13:00–18:00 não recebem timeblock de nenhuma frente.
 3. Cada especialista roda isolado, só com dados da sua frente.
 4. O Mestre é o único writer de Calendar.
-5. O plano do dia no Notion reflete o merge, com frentes descobertas explícitas.
+5. O plano do dia no Notion reflete o merge, com frentes descobertas explícitas. *(hoje: `upsertDailyPlan` ainda é mapa em memória.)*
 6. Todoist Hoje não ganha item inventado pelo LLM.

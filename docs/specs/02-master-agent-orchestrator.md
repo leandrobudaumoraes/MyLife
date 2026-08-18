@@ -1,12 +1,14 @@
 # 02 — Agente Mestre (orquestrador e timeblocking)
 
-**Status:** contrato v0.1 (SDD)  
+**Status:** contrato v0.1 (SDD) · grafo de 3 nós em `LifeOsGraph.ts`; job `src/jobs` ainda não existe  
 **Depende de:** [00-architecture-overview.md](./00-architecture-overview.md), [01-api-integrations.md](./01-api-integrations.md)  
 **Alimenta:** [03-specialist-agents.md](./03-specialist-agents.md)
 
-O Agente Mestre é o único processo que **escreve no relógio**. Roda em CRON no Debian, consulta os cinco especialistas em paralelo, aplica políticas de conflito e anti-ruído, e materializa o timeblocking do dia.
+O Agente Mestre é o único processo que **escreve no relógio**. Consulta os cinco especialistas em paralelo (nó `specialist`), aplica políticas de conflito e anti-ruído (nó `builder`), e materializa o timeblocking do dia.
 
 Ele **não** é dono de frente. Não prioriza Mim sobre Família “por default”: a grade protegida já decidiu os donos. O Mestre só preenche **gaps** e aplica exceções.
+
+Ciclo como o código executa hoje: [Funcionalidade.md](./Funcionalidade.md).
 
 ---
 
@@ -27,7 +29,11 @@ Ele **não** é dono de frente. Não prioriza Mim sobre Família “por default�
 
 ## 2. CRON e janelas
 
-Fuso: `America/Sao_Paulo`. O processo Node fica up (systemd user ou cron do sistema chamando `node dist/jobs/daily-orchestrator.js`).
+Fuso: `America/Sao_Paulo`.
+
+**No repositório hoje:** `src/run-life.sh` faz `cd` na raiz, carrega o bashrc e chama `npx tsx src/test-run.ts`, redirecionando para `logs/cron.log`. `test-run.ts` instancia o container e chama `executeDailyTriage({ dryRun: false })`. Não há `src/jobs`, não há `node-cron` importado, não há lock file, não há `src/index.ts`. Quem agenda (crontab/systemd) fica fora do git. `LIFE_OS_CRON` **não é lido**.
+
+**Contrato** (quando existir job no repo):
 
 | Job | Expressão | Papel |
 |---|---|---|
@@ -35,7 +41,7 @@ Fuso: `America/Sao_Paulo`. O processo Node fica up (systemd user ou cron do sist
 | `evening` | `30 21 * * *` | Opcional v0.2: pré-plano de amanhã. **Fora de v0.1** |
 | `weekly` | `0 21 * * 0` | Opcional v0.2: revisão semanal. **Fora de v0.1** |
 
-`LIFE_OS_CRON` sobrescreve só o job `daily`.
+`LIFE_OS_CRON` sobrescreveria só o job `daily` — ainda não implementado.
 
 Regras:
 
@@ -63,6 +69,30 @@ export const DAILY_JOB: CronJobSpec = {
 
 ## 3. Grafo LangGraph
 
+### 3.0 Implementação atual (`LifeOsGraph.ts`)
+
+```mermaid
+stateDiagram-v2
+  [*] --> triage
+  triage --> specialist
+  specialist --> builder
+  builder --> [*]
+```
+
+| Nó | Quem | I/O |
+|---|---|---|
+| `triage` | LLM + `detectConstraints` + `computeGaps` | Delega Inbox → especialista ou `ignore_pagbank` |
+| `specialist` | 5× LLM em paralelo (`SPECIALIST_ORDER`) | `SpecialistOutput[]` |
+| `builder` | Políticas determinísticas + LLM só no callout | `plan`, `calendarWrites`, `conflicts`, `todoistTodayIds` |
+
+O Mestre (`MasterAgent.executeDailyTriage`) carrega Todoist/Notion/Calendar **antes** de `graph.invoke`. O grafo não chama portas. Persistência é depois: `upsertFlexEvent` → `upsertDailyPlan` (memória) → `applyKanbanMoves` (memória) → `promoteToToday`.
+
+`listBusy` e `deleteOccurrence` existem na porta e **não** entram nesta corrida. Ocupado = `listProtectedOccurrences`. Plantão/rito preenchem `constraints` e não apagam ocorrência.
+
+### 3.1 Contrato alvo (ainda não é o StateGraph)
+
+O diagrama abaixo permanece o alvo da spec. O código ainda não tem nós `LoadClock`, `LoadBusy`, `PersistCalendar` dentro do grafo.
+
 ```mermaid
 stateDiagram-v2
   [*] --> LoadClock
@@ -78,7 +108,21 @@ stateDiagram-v2
   EmitResult --> [*]
 ```
 
-Nós são funções puras sobre `OrchestratorState`, com I/O só via portas injetadas.
+Nós do **contrato alvo** são funções sobre `OrchestratorState`, com I/O só via portas. O grafo **atual** usa `AgentState` (`inbox`, `projects`, `delegations`, `calendarWrites`, …) e não chama portas — o Mestre já carregou.
+
+Há um tipo extra no código, ausente do contrato de 9 nós:
+
+```typescript
+export type TriageTarget =
+  | Exclude<AgentId, "mestre">
+  | "ignore_pagbank";
+
+export interface Delegation {
+  readonly actionId: string;
+  readonly agentId: TriageTarget;
+  readonly rationale: string;
+}
+```
 
 ```typescript
 export interface OrchestratorState {
@@ -121,8 +165,14 @@ Contrato do grafo:
 ```typescript
 export interface IMasterOrchestrator {
   run(date: string): Promise<Result<OrchestratorResult>>;
+  executeDailyTriage(options?: {
+    readonly dryRun?: boolean;
+    readonly date?: string;
+  }): Promise<Result<OrchestratorResult>>;
 }
 ```
+
+`run(date)` no código delega para `executeDailyTriage({ date })`. `dryRun: true` loga os writes e não chama as portas de mutação. A entrada `src/test-run.ts` usa `dryRun: false`.
 
 Fan-out: `Promise.all` nos cinco especialistas. Timeout por especialista: 25 s. Falha de um → `uncovered: true` daquela frente, as outras seguem.
 
@@ -144,17 +194,17 @@ export interface ConstraintDetector {
 
 Heurística v0.1 (determinística, sem LLM):
 
-- `plantao`: existe evento no `primary` cujo summary contém `plantão` / `plantao` (case insensitive) cobrindo madrugada do `date`, **ou** flag futura `LIFE_OS_PLANTAO=1`. Plantão **não** é série.
+- `plantao`: existe evento no ocupado cujo summary contém `plantão` / `plantao` (case insensitive). Flag `LIFE_OS_PLANTAO` **não é lida**. Plantão **não** é série.
 - `ritoNoSabado`: `date` é sábado **e** `rites.length > 0` no dia.
 - `smileOrConsult`: evento `SAUDE` avulso (não está em `PROTECTED_SERIES_IDS`) sobreposto a 17:30–20:00.
 
 Efeito:
 
-| Flag | Ação do Mestre |
-|---|---|
-| `plantao` | Pede `deleteOccurrence` de Zone 2 do dia e Ultra da **noite seguinte** se for ter/qui. Escola **intocada**. Sono: apagar ocorrência da madrugada acordada, não a série. 90/5 e chá verde não entram em lugar nenhum |
-| `ritoNoSabado` | Pede `deleteOccurrence` da oficina `jrpcc165gkfi6nqnbb6gsob4uo` naquele sábado. Não cria substituto |
-| `smileOrConsult` | Não cria flex em cima. Não reabre ocorrência de Família já apagada |
+| Flag | Contrato | Código hoje |
+|---|---|---|
+| `plantao` | Pede `deleteOccurrence` de Zone 2 do dia e Ultra da **noite seguinte** se for ter/qui. Escola **intocada**. | Só preenche `constraints.plantao`. **Não apaga** ocorrência |
+| `ritoNoSabado` | Pede `deleteOccurrence` da oficina `jrpcc165gkfi6nqnbb6gsob4uo` naquele sábado. Não cria substituto | Só preenche `constraints.ritoNoSabado` |
+| `smileOrConsult` | Não cria flex em cima. Não reabre ocorrência de Família já apagada | Usado nas constraints; overlap com protegido já rejeita flex |
 
 ### 4.2 Cálculo de gaps
 
@@ -338,13 +388,40 @@ Cue do flex (Mestre monta, não o LLM):
 
 Kanban: todo flex aceito gera `KanbanMove` `next → timeblocked` se houver card; senão o Daily Plan lista a ação sem card novo.
 
-Todoist: `promoteToToday` apenas para `todoistTodayIds` **interseção** com `accepted.gtdActionId`. Especialista não promove sozinho.
+Todoist: `promoteToToday` para a união de `todoistTodayIds` com `accepted.gtdActionId`, **menos** itens `ignore_pagbank`. Só roda se todos os `upsertFlexEvent` da corrida tiverem ok. Especialista não promove sozinho.
 
 ---
 
 ## 8. Prompt de sistema do Mestre
 
-O nó `ApplyPolicies` é determinístico. O LLM do Mestre **só** existe no nó opcional `NarratePlan` (v0.1 **ligado**, temperatura 0) para a frase do callout do Daily Plan. Não escolhe horário.
+Há **dois** usos de LLM no Mestre, nenhum escolhe horário.
+
+### 8.1 Nó `triage` (`TRIAGE_SYSTEM_PROMPT`)
+
+```
+Você é o Agente Mestre do Life OS do Leandro.
+
+Missão neste nó: ler a Inbox GTD e DELEGAR cada item para no máximo um especialista, ou marcar ignore_pagbank.
+
+Cinco especialistas (e só esses):
+- pessoal → frente Mim (saúde, treino, academia, M3Gym, Ultra, Zone 2)
+- infraestrutura_casa → frente Casa (compras que exigem sair, contas, manutenção)
+- profissional_instituto → frente Instituto (oficina sábado, uma entrega)
+- operacoes_loja_lua_branca → frente Loja Lua Branca (um item com Caroline, quinta 18:00)
+- logistica_familiar → frente Família (Arthur, escola, presença, Caroline como família)
+
+PagBank / Engenharia NÃO é agente. É restrição de relógio (09:00–18:00 em dia útil).
+Se o item for trabalho corporativo (bug, conciliação, recebíveis, PR, PagBank, engenharia),
+agentId = "ignore_pagbank". Não invente um sexto agente.
+
+Item com dois donos (ex.: evento da Caroline): escolha UM especialista — Loja se for operação/propaganda da loja; Família se for logística de presença. Não duplique.
+
+Português do Brasil. Sem empolgação.
+```
+
+### 8.2 Callout do Daily Plan (`MASTER_CALLOUT_PROMPT`)
+
+O nó `builder` aplica políticas de forma determinística. O LLM **só** escreve a frase do callout, temperatura 0.
 
 ```
 Você é o Agente Mestre do Life OS do Leandro.
@@ -369,6 +446,16 @@ Saída: `{ "callout": string }` validado por Zod. Falha → callout fallback: `T
 
 ## 9. Persistência — ordem e rollback
 
+Ordem no `MasterAgent` hoje:
+
+1. Calendar flex upserts (N ≤ 3) — API real.
+2. Notion `upsertDailyPlan` + `applyKanbanMoves` — **mapa em memória**.
+3. Todoist `promoteToToday` — só se todos os upserts de Calendar da corrida tiverem ok.
+
+`deleteOccurrence` está no contrato e no adaptador; o Mestre **não chama** neste passo (passo 2 do contrato abaixo).
+
+Contrato (quando as flags plantão/rito apagarem ocorrência):
+
 1. Calendar flex upserts (N ≤ 3).
 2. Calendar deleteOccurrence (0–N, só flags).
 3. Notion `upsertDailyPlan` + `applyKanbanMoves`.
@@ -376,21 +463,11 @@ Saída: `{ "callout": string }` validado por Zod. Falha → callout fallback: `T
 
 Não há transação distribuída. Compensação v0.1:
 
-- Se Calendar ok e Notion falha: resultado `ok: false` parcial; **não** apaga os flex (o plano no relógio vale mais). Retry no próximo CRON é idempotente.
-- Se Calendar falha no item 2 de 3: não promove Todoist; Notion registra `skipped`.
+- Se Calendar ok e Notion falha: resultado com `partial: true`; **não** apaga os flex. Retry no próximo CRON é idempotente via `lifeOsKey`.
+- Se Calendar falha em algum flex: não promove Todoist; anota `todoist_skipped: Calendar parcial`.
 - Nunca compensar com delete de série.
 
-```typescript
-export interface OrchestratorResult {
-  readonly plan: DailyPlan;
-  readonly writtenEventIds: readonly string[];
-  readonly skipped: readonly string[];
-  readonly rejected: readonly RejectedProposal[];
-  readonly partial: boolean;
-}
-```
-
-(Estende o tipo do doc 00 com `rejected` e `partial`.)
+`OrchestratorResult` (kernel, spec 00) já inclui `rejected` e `partial`.
 
 ---
 
@@ -398,17 +475,15 @@ export interface OrchestratorResult {
 
 Ferramentas (LangGraph nodes, não function-calling livre para o LLM de políticas):
 
-| Node | Portas | Side effect |
+| Node | No código | Side effect |
 |---|---|---|
-| `LoadBusy` | `IGoogleCalendarPort.listBusy`, `listProtectedOccurrences`, `listInstitutoRites` | não |
-| `FanOut` | 5× `SpecialistAgent.propose` | não |
-| `ApplyPolicies` | `PolicyEngine` | não |
-| `PersistCalendar` | `upsertFlexEvent`, `deleteOccurrence` | sim |
-| `NarratePlan` | `ILlmPort` | não |
-| `PersistNotion` | `upsertDailyPlan`, `applyKanbanMoves` | sim |
-| `PersistTodoist` | `promoteToToday` | sim |
+| `triage` | LLM + gaps + constraints | não |
+| `specialist` | 5× prompt em `specialist-prompts.ts` | não |
+| `builder` | `applyPolicies` + callout LLM | não |
+| Persistência | **fora** do grafo, em `MasterAgent` | Calendar upsert; Notion memória; Todoist promote |
+| `deleteOccurrence` | adaptador existe | **não chamado** |
 
-O LLM dos especialistas **pode** usar tools de leitura (listar ações) — ver spec 03. O LLM do Mestre **não** tem tools de write.
+O LLM dos especialistas **não** tem tools de leitura — o Mestre já injetou ações, specs, occupied e gaps no prompt. O LLM do Mestre no `builder` **não** tem tools de write (só o callout).
 
 ---
 
@@ -448,10 +523,10 @@ Sábado sem rito: Instituto cobre com série + 1 entrega Todoist promovida. Casa
 
 ## 13. Critério de aceite desta spec
 
-1. Job 05:20 no fuso correto; lock impede duplicata.
+1. Job 05:20 no fuso correto; lock impede duplicata. *(lock e `src/jobs` ainda não existem; o wrapper é `src/run-life.sh`.)*
 2. Falha do especialista Loja não impede Família.
 3. Proposta que cruza 13:00–18:00 em dia útil nunca é escrita.
 4. Dois CRON no mesmo dia não duplicam evento (`lifeOsKey`).
-5. Sábado com rito: oficina tem ocorrência removida; sem flex Instituto substituto.
+5. Sábado com rito: oficina tem ocorrência removida; sem flex Instituto substituto. *(delete ainda não é chamado pelo Mestre.)*
 6. Callout do Notion ≤ 140 chars e não cita dose.
 7. Grafo sem aresta de especialista → Calendar port.

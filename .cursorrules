@@ -52,8 +52,8 @@ PagBank / Engenharia **não** é agente. É **restrição de relógio** (`ENGENH
 
 ## Implementação
 
-- Hexágono: `src/core` (domínio + portas) → `src/adapters` → `src/agents` → `src/jobs`.
+- Hexágono hoje: `src/core` (domínio + portas + grafo) → `src/adapters/apis` → `src/infrastructure/di`. Entrada: `src/test-run.ts` (wrapper `src/run-life.sh`). Pastas `src/agents` e `src/jobs` ainda não existem.
 - Cada adaptador implementa uma porta. Testes mockam portas, não HTTP.
-- Prompts de sistema dos especialistas: contrato em `03-specialist-agents.md`.
-- CRON do Mestre: contrato em `02-master-agent-orchestrator.md`.
+- Prompts de sistema dos especialistas: contrato em `03-specialist-agents.md`; texto no código em `src/core/domain/orchestrator/specialist-prompts.ts`.
+- CRON do Mestre: contrato em `02-master-agent-orchestrator.md`; disparo atual em `src/run-life.sh`.
 - Idioma do produto e das specs: português (Brasil). Identificadores de código: inglês.

@@ -1,58 +1,81 @@
-📖 Status do Projeto: Life OS (Multi-Agent System)
-1. Visão Geral do Sistema
-O Life OS é um orquestrador autônomo baseado em uma arquitetura de Sistema Multi-Agentes (MAS). Desenvolvido em Node.js com TypeScript, ele atua como o cérebro da rotina diária, conectando a execução de tarefas (Todoist), o planejamento sistêmico (Notion/PARA) e a alocação de tempo (Google Calendar) através da metodologia de Timeblocking e princípios GTD e Kanban.
+# Specs do Life OS
 
-2. Decisões Arquiteturais e Restrições
-Paradigma: Arquitetura Hexagonal (Ports and Adapters) com Injeção de Dependência via InversifyJS. O núcleo (Core) é estritamente isolado de dependências externas.
+Contrato de comportamento do MAS. Código em `src/` implementa este contrato. Nada aqui autoriza inventar sexta frente, evento de cápsula, segundo bloco da Loja ou write em série protegida.
 
-Validação de Dados: Zod para garantia de contratos nos DTOs em tempo de execução.
+**Como ler:** a spec 00 é a fonte da verdade das regras. 01, 02 e 03 especializam portas, Mestre e especialistas. [Funcionalidade.md](./Funcionalidade.md) descreve uma corrida como o código faz hoje. Este índice separa o que já está no `src/` do que ainda é só contrato.
 
-Blindagem Corporativa (Timebox): O horário comercial das 09:00 às 18:00 é tratado como uma restrição de relógio (Timebox) inflexível dedicada às responsabilidades de engenharia (PagBank). Nenhum agente da IA tem permissão para sobrescrever ou alocar tarefas pessoais neste intervalo de tempo.
+---
 
-Idempotência e Segurança: Implementação de regras de write fence e lifeOsKey para evitar condições de corrida, duplicação de eventos ou perdas de dados no calendário.
+## Índice
 
-3. Escopo de Domínios (As 5 Frentes)
-O sistema divide a carga cognitiva do usuário em 5 pilares, futuramente gerenciados por Agentes Especialistas:
+| Arquivo | Conteúdo |
+|---|---|
+| [Funcionalidade.md](./Funcionalidade.md) | Ciclo diário (entrada → coleta → grafo → persistência) |
+| [00-architecture-overview.md](./00-architecture-overview.md) | Visão, camadas GTD/PARA/Kanban, grade, kernel, políticas |
+| [01-api-integrations.md](./01-api-integrations.md) | Portas Todoist / Notion / Calendar, erros, env |
+| [02-master-agent-orchestrator.md](./02-master-agent-orchestrator.md) | CRON, grafo, merge, teto anti-ruído |
+| [03-specialist-agents.md](./03-specialist-agents.md) | Cinco especialistas, prompts, autorização |
 
-Mim (Saúde e Vitalidade): Gestão de treinos (M3Gym), práticas físicas (Pilates) e planejamento de alimentação de baixo índice glicêmico.
+Runtime do contrato: Node.js ≥ 20 · TypeScript `strict` · ESM · fuso `America/Sao_Paulo`.
 
-Casa (Infraestrutura): Controle de finanças, manutenções, logística do carro e rotina residencial na cidade de São Paulo.
+---
 
-Instituto (Gestão): Desenvolvimento e organização institucional.
+## Status de implementação
 
-Loja Lua Branca (E-commerce e Operações): Planejamento reverso e suporte tático para o e-commerce da Caroline e eventos-chave, como a organização temática para 26 de setembro.
+Leitura honesta do `src/` em relação às specs 00–03. Itens sem arquivo correspondente **não estão prontos**, mesmo que o contrato já os descreva.
 
-Família: Suporte logístico global, incluindo as rotinas do filho e alinhamento de agendas familiares.
+### Feito
 
-4. O que já foi implementado (Milestones Concluídos)
-Fase 1: Fundação SDD (Spec-Driven Development)
-[x] Inicialização do ambiente Node.js (v20+) em ESM com TypeScript.
+- Ambiente Node 20+, `"type": "module"`, `tsconfig.json` strict com decorators.
+- Kernel em Zod (`src/core/domain/schemas.ts`) alinhado aos tipos da spec 00, com `GtdAction.front` anulável (Inbox sem projeto) e `OrchestratorResult` com `rejected` + `partial`.
+- Catálogo das 5 frentes, hubs Notion, 13 séries protegidas e `assertNotProtectedWrite` (`catalog.ts`).
+- Portas `TodoistPort`, `NotionPort`, `CalendarPort` (aliases `ITodoistPort`, `INotionPort`, `IGoogleCalendarPort`).
+- Adaptadores em `src/adapters/apis/` usando os SDKs oficiais — **não** são mais stubs que devolvem mock de tarefa/evento.
+- Container Inversify em `src/infrastructure/di/inversify.config.ts`.
+- `MasterAgent` carrega as três portas, monta o estado, invoca `LifeOsGraph` e persiste o resultado.
+- Grafo LangGraph com três nós: `triage` → `specialist` → `builder` (`LifeOsGraph.ts`).
+- Prompts de sistema em `specialist-prompts.ts` (triagem, cinco especialistas, callout do Daily Plan).
+- Políticas determinísticas no `builder`: PagBank, sono, almoço, teto de 3 flex, 1 flex por frente, Loja/Instituto sem flex extra, gap 08:20–09:00 recusado.
+- Entrada `src/test-run.ts` (`dryRun: false`) e wrapper `src/run-life.sh` → `logs/cron.log`.
 
-[x] Configuração do tsconfig.json (strict mode, decorators ativados) e package.json.
+### Parcial
 
-[x] Criação do arquivo de contexto global .cursorrules ditando princípios SOLID, DI e SDD.
+| Contrato | O que o código faz |
+|---|---|
+| Notion Specs da Agenda (`Status = ativo`) | Query em `NOTION_PROJECTS_DB_ID` com filtro nativo `Status = Em andamento`; mapeamento ainda espera propriedades de spec (`Nome`, `Pilar`, `Prefixo`, `Cue`, …) |
+| `upsertDailyPlan` / `applyKanbanMoves` / `listKanban` | Mapas em memória no `NotionAdapter`. Não criam página no workspace |
+| `listBusy` no ciclo diário | Porta e adaptador existem; o Mestre **não chama** `listBusy`. Ocupado = só `listProtectedOccurrences` |
+| Exceção plantão / rito → `deleteOccurrence` | Heurística preenche `constraints`; o Mestre **não apaga** ocorrência |
+| `ILlmPort` + `IClock` | Tokens existem; o grafo instancia `ChatOpenAI` e formata data com `Intl` |
+| OAuth Google da spec (`GOOGLE_OAUTH_*` ou service account) | Código lê `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` |
+| Job CRON `20 5 * * *` via `node-cron` + lock file | Dependência `node-cron` instalada e **não usada**. Não há `src/jobs`. Lock `/tmp/life-os-daily-{date}.lock` ausente |
 
-[x] Geração dos contratos (Specs 00 a 03) na pasta /docs/specs.
+### Ainda não existe no `src/`
 
-Fase 2: Core e Portas (O Hexágono)
-[x] Domínio: Criação dos Schemas em Zod (src/core/domain/schemas.ts).
+- `src/agents/`, `src/jobs/`, `src/index.ts`.
+- Adaptadores `OpenAiLlmAdapter` e `SystemClock`.
+- Classes Inversify por especialista (`AGENT_TOKENS`). Os cinco correm como funções no nó `specialist`.
+- Tools LangChain `list_actions` / `list_specs` / `list_kanban` no LLM do especialista (o Mestre já injeta o recorte no prompt).
+- Jobs `evening` e `weekly` (spec 02: fora de v0.1).
+- Variáveis `LIFE_OS_TZ`, `LIFE_OS_CRON`, `LIFE_OS_PLANTAO` — nenhum `process.env` as lê.
 
-[x] Portas (Interfaces): TodoistPort, NotionPort e CalendarPort definidas rigorosamente no núcleo do sistema.
+---
 
-[x] Adapters (Mocks com SDKs): Implementação do TodoistAdapter, NotionAdapter e CalendarAdapter retornando dados mockados válidos.
+## Decisões que o código já aplica
 
-[x] Injeção de Dependência: Container Inversify configurado (inversify.config.ts), resolvendo os tokens de dependência e ligando Portas aos Adapters.
+- Arquitetura hexagonal: domínio não importa SDK. Adaptadores traduzem para tipos do kernel.
+- Validação Zod nos DTOs.
+- Timebox PagBank 09:00–18:00 em dia útil: fallback hardcoded mesmo se a API de Calendar falhar (`busy_fallback` no resultado).
+- Idempotência de flex: `extendedProperties.private.lifeOsKey` no upsert.
+- Triagem da Inbox: LLM delega para um dos cinco agentes **ou** `ignore_pagbank`. Item sem delegação cai no fallback por `front` / palavras PagBank.
+- Persistência (ordem no Mestre): Calendar flex → Notion Daily Plan (memória) → Kanban (memória) → Todoist `promoteToToday` só se todos os upserts de Calendar da corrida tiverem ok.
 
-Fase 3: Orquestrador Mestre e Testes
-[x] MasterAgent: Criada a classe do Agente Mestre (src/core/domain/orchestrator/MasterAgent.ts) com injeção das três portas principais.
+---
 
-[x] Lógica Sequencial (Pré-LangGraph): Implementado o método executeDailyTriage(), que coleta tarefas e projetos simulados, e gera blocos de agenda.
+## Backlog imediato (só o que as specs já pedem e o `src/` ainda não tem)
 
-[x] Motor de Teste: O script src/test-run.ts está operante. Ele sobe o contêiner, processa os dados mockados e já aplica a regra de bloqueio (guardrail) impedindo agendamentos que conflitam com a restrição de relógio das 09:00 às 18:00.
-
-5. Próximos Passos (Backlog Imediato)
-Configuração de Variáveis de Ambiente: Criar o arquivo .env para carregar as chaves de API reais e do provedor de LLM.
-
-Motor de Raciocínio (LangGraph): Refatorar o MasterAgent para instanciar a máquina de estados (LifeOsGraph), delegando a análise das tarefas aos Agentes Especialistas (Nós) que farão o roteamento semântico da Inbox.
-
-Substituição dos Mocks: Trocar os retornos mockados dos Adapters pelas chamadas diretas às APIs usando os SDKs oficiais instalados.
+1. Porta `ILlmPort` / `IClock` e tirar `ChatOpenAI` de dentro do domínio.
+2. Persistência real de Daily Plan e Kanban no Notion.
+3. Mestre chamar `listBusy` (não só séries protegidas) e `deleteOccurrence` quando `plantao` / `ritoNoSabado`.
+4. Job em `src/jobs` com fuso, expressão 05:20 e lock de uma corrida por `date`.
+5. Alinhar o banco Notion da query (`Em andamento` vs. Specs `ativo` / `rascunho`) ao contrato da spec 01.
