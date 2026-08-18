@@ -73,6 +73,8 @@ Regras comuns do Life OS:
 - Plantão: não sugerir Zone 2 nem Ultra da noite seguinte; escola 07:15 permanece.
 - Dia de rito (sábado): oficina cede; você não inventa substituto.
 - Trabalho PagBank / engenharia / bug de produção NÃO é sua frente. Ignore.
+- start e end: HH:MM do DATE da corrida, ou ISO começando com DATE. Nunca prefixo de dia da semana.
+- cue e rationale só da ação do gtdActionId. Não copie texto de outras ACTIONS.
 ```
 
 ### 1.5 Diagrama de escopo
@@ -205,7 +207,7 @@ Coluna `done` não é marcada pelo agente (humano completa no Todoist). Moves pe
 
 ### 3.1 Escopo
 
-**Dentro:** contas, casa física, carros, manutenção, compras **que exigem sair**, boletos, usufruto sem se prejudicar. Uma ação física por vez. Sábado depois das 12:00 é o gap canônico.
+**Dentro:** contas, casa física, carros, manutenção, compras **que exigem sair**, boletos, usufruto sem se prejudicar. Uma ação física por vez. Gap canônico: sábado depois das 12:00; em dia útil, tarefa atômica **sem due** entra no gap livre **pós-18:00 do DATE corrente** (nunca num sábado futuro).
 
 **Fora:** presença com Arthur (Família), item da Loja Lua Branca (Loja), planilha nova no vault, spec `LAR` (não existe série), segundo bloco noturno, invadir PagBank ou 06:00–08:20.
 
@@ -219,13 +221,17 @@ Tese: o dinheiro do lar existe para a família usufruir sem se prejudicar. O age
 
 ### 3.3 Regras de negócio específicas
 
-1. Sem série `LAR`. Flex sábado = `kind: "flex_timeblock"`, prefix `LAR`, cue autossuficiente (Watch pode não abrir Notion).
+1. Sem série `LAR`. Flex = `kind: "flex_timeblock"`, prefix `LAR`, cue autossuficiente (Watch pode não abrir Notion).
 2. Não criar spec. `spec: null` até existir série.
-3. Contexto `Compra` + `Rua` → sábado tarde, depois das 12:00, duração 60–120 min, não atravessar 22:00.
-4. Contexto `Celular` + boleto: preferir **não** timeblockar (ação em Hoje basta). Só flex se `priority` da tarefa for `Alta` **e** o humano precisar de hora — v0.1: ainda assim o Mestre rejeita 08:20–09:00. Este agente **não deve** propor 08:20–09:00.
-5. Não propor 18:00–20:00 (Família dona do prefixo no relógio).
-6. Uma proposta de flex no máximo (o Mestre ainda corta em 1 por frente).
-7. Título curto: `LAR - {conta|compra|manutenção}`.
+3. Fidelidade semântica: `title`, `cue` e `rationale` descrevem **somente** a ação cujo `gtdActionId` está na proposta. Proibido inferir ou reutilizar prefixo de dia da semana, horário rígido ou local que **não** conste no título bruto atual (anti-exemplos: `"Sáb 14:00"`, `"Sair. Uma loja."`, `"lista no celular"`).
+4. Tarefa atômica sem `due` (compra, manutenção rápida, ex. `"Comprar ingredientes para o café"`): flex no **DATE corrente**. Dia útil: primeiro gap livre após o expediente (após 18:00; se 18:00–20:00 estiver occupied por Família, o próximo gap — em geral 20:00). Sábado: após 12:00. Domingo: após 18:00. Duração estimada: compra/rua ~60 min, manutenção rápida ~30 min. Nunca ISO de outro dia, nunca “próximo sábado”.
+5. Contexto `Compra` + `Rua` **no sábado** → tarde, depois das 12:00, 60–120 min, não atravessar 22:00. No dia útil sem `due`, aplica a regra 4 (hoje, pós-18:00), não espera o sábado.
+6. Contexto `Celular` + boleto: preferir **não** timeblockar (ação em Hoje basta). Só flex se `priority` da tarefa for `Alta` **e** o humano precisar de hora — v0.1: ainda assim o Mestre rejeita 08:20–09:00. Este agente **não deve** propor 08:20–09:00.
+7. Não propor 18:00–20:00 quando Família está no `occupied`. Não atravessar quinta 18:00 (Loja) nem ter/qui 20:00 (Ultra).
+8. Uma proposta de flex no máximo (o Mestre ainda corta em 1 por frente).
+9. Título curto: `LAR - {conta|compra|manutenção}` **ou** o título bruto da ação, sem prefixo de dia/hora legado.
+10. `rationale` ≤ 280, só a necessidade imediata da ação atual. Sem referência cruzada a outras ACTIONS do banco.
+11. Defesa em profundidade (código, não LLM): `toProposal` descarta `start`/`end` que não parseiam para o DATE; em Casa elegível (sem `due` ou `due` no DATE) encaixa no gap pós-expediente e sanitiza cue/rationale. Se o LLM devolver `proposals: []` e existir ação elegível, o nó `specialist` gera **um** flex nesse gap.
 
 ### 3.4 Prompts
 
@@ -234,13 +240,20 @@ Tese: o dinheiro do lar existe para a família usufruir sem se prejudicar. O age
 ```
 Você é o Agente de Infraestrutura da Casa do Life OS do Leandro (frente Casa — Finanças e Manutenção).
 
-Missão: tirar do inbox GTD do projeto 🏠 Lar a próxima ação física que segura o lar (pagar, consertar, comprar saindo). Encaixar no sábado à tarde se precisar de rua. Não virar CFO. Não abrir planilha. Não criar série LAR.
+Missão: tirar do inbox GTD do projeto 🏠 Lar a próxima ação física que segura o lar (pagar, consertar, comprar saindo). Não virar CFO. Não abrir planilha. Não criar série LAR.
 
-Compras de alimento da semana (abacate, linhaça, cacau) são ação de rua/compra: um flex no sábado depois das 12:00 (60–120 min) se o DATE for sábado; em dia útil prefira promover para Hoje e NÃO timeblockar 09:00–18:00.
+Fidelidade semântica (inviolável):
+- title, cue e rationale descrevem SOMENTE a ação cujo gtdActionId você está propondo.
+- O cue deriva do título bruto atual. Proibido inferir ou reutilizar prefixos de dia da semana, horários ou locais que NÃO estejam nesse título.
+- Não copie roteiro de loja genérico, “lista no celular”, nem qualquer fragmento de outra ACTION ou de exemplos antigos.
 
-Proibido: 09:00–18:00 dia útil (PagBank + almoço), 06:00–08:20, 18:00–20:00, 22:00–06:00, quinta 18:00 (Loja), ter/qui 20:00 (Ultra).
+Tarefa atômica sem due (compra, manutenção rápida):
+- flex_timeblock no DATE corrente. Nunca um sábado futuro nem outro dia da semana.
+- start/end: HH:MM do DATE (ex. 20:30) ou ISO começando com DATE.
+- Dia útil: gap livre após 18:00 (se Família ocupa 18:00–20:00, use o próximo gap). Sábado: após 12:00. Domingo: após 18:00.
+- Estime duração (compra/rua ~60 min, manutenção rápida ~30 min) e caiba no gap. Não atravesse 22:00.
 
-Cue exemplo (sem Notion): "Sáb 14:00: lista no celular. Sair. Uma loja. Voltar antes das 18:00."
+Proibido: 09:00–18:00 dia útil (PagBank + almoço), 06:00–08:20, 18:00–20:00 quando Família está occupied, 22:00–06:00, quinta 18:00 (Loja), ter/qui 20:00 (Ultra).
 
 {regras comuns}
 
@@ -461,7 +474,7 @@ Tickler `inbox → next`. Presença (escola, noite) **não** vira card — já �
 | Agente | Lê Todoist | Lê Specs | Propõe flex | Promove Hoje | Write Calendar |
 |---|---|---|---|---|---|
 | Pessoal | Vitalidade | Sono, Zone 2, Ultra, Almoço | Não (v0.1) | Sim, rotina do dia | Não |
-| Infraestrutura Casa | Lar | nenhuma spec LAR | Sim, sáb tarde | Sim, 1 ação | Não |
+| Infraestrutura Casa | Lar | nenhuma spec LAR | Sim, DATE corrente (pós-18:00 dia útil; sáb ≥ 12:00) | Sim, 1 ação | Não |
 | Profissional Instituto | Instituto | Oficina Instituto | Não | Sábado, 1 entrega | Não |
 | Operações Loja | nenhum (v0.1) | Planejamento Caroline | Não | Só se ação futura na quinta | Não |
 | Logística Familiar | Família | Casa, Escola, Família/lar | Raro | Tickler due hoje | Não |
@@ -545,6 +558,7 @@ Há ainda o prompt de triagem (`TRIAGE_SYSTEM_PROMPT`) no Mestre: Inbox → um d
 |---|---|
 | Pessoal, terça normal | Evento `SAUDE - Citrulina` |
 | Casa, terça 18:30 | Flex `LAR - boleto` em cima da Família |
+| Casa, Inbox `"Comprar ingredientes para o café"` sem due | Cue/start `"Sáb 14:00: lista no celular. Sair. Uma loja."` ou ISO de outro dia |
 | Instituto, sábado | Três tarefas (playlist + site + música) |
 | Loja, quinta | Segundo evento 19:00–20:00 (come Ultra) |
 | Loja, segunda | Qualquer proposta |
@@ -559,7 +573,7 @@ Há ainda o prompt de triagem (`TRIAGE_SYSTEM_PROMPT`) no Mestre: Inbox → um d
 1. Cinco system prompts, um `front` cada, recorte só da própria frente no prompt (sem tools LangChain ainda).
 2. Instituto e Loja com `proposals: []` nos testes de contrato. *(O `builder` rejeita flex dessas frentes mesmo se o LLM propuser.)*
 3. Pessoal promove «Ao acordar» em dia útil e não cria flex 06:00.
-4. Casa só propõe flex com `start ≥ sábado 12:00` quando weekday = sábado.
+4. Casa: ação sem `due` → flex no DATE; dia útil `start ≥ 18:00` em gap livre (não 18:00–20:00 se Família occupied); sábado `start ≥ 12:00`. `start`/`end` nunca carregam prefixo de dia da semana. Cue e rationale não copiam exemplo legado nem outras ACTIONS.
 5. Família marca `uncovered` se escola ausente em dia útil.
 6. Loja escolhe ≤ 1 card na quinta e zero nos outros dias.
 7. Nenhum especialista importa `googleapis`.

@@ -109,7 +109,7 @@ Sentido proibido: especialista escrever direto no Calendar. Só o Mestre persist
 
 ## 5. Grade-tipo (restrições de relógio)
 
-O Mestre trata a grade abaixo como **ocupado protegido**. Timeblocking livre só entra em **folgas** (gaps). Folgas típicas: 08:20–09:00; sábado depois das 12:00; domingo depois da Ultra — e somente se um especialista tiver ação física que **precisa de hora**.
+O Mestre trata a grade abaixo como **ocupado protegido**. Timeblocking livre só entra em **folgas** (gaps). Folgas típicas: sábado depois das 12:00; dia útil depois das 18:00 (Casa atômica sem `due`, no DATE corrente, sem inventar sábado futuro); domingo depois da Ultra — e somente se um especialista tiver ação física que **precisa de hora**. O gap 08:20–09:00 em dia útil é recusado (`noise_cap`).
 
 | Slot | Dono | Frente / restrição |
 |---|---|---|

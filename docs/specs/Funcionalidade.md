@@ -47,9 +47,9 @@ O LLM recebe Inbox + projetos + títulos de specs e devolve `delegations`: um es
 
 ### 3.2 `specialist`
 
-Os cinco agentes rodam em `Promise.all`, na ordem documental `SPECIALIST_ORDER` (Família, Pessoal, Casa, Instituto, Loja). Cada um vê só as ações delegadas a ele (ou da sua frente e não delegadas a outro), o Kanban da frente, specs completas, ocupado e gaps.
+Os cinco agentes rodam em `Promise.all`, na ordem documental `SPECIALIST_ORDER` (Família, Pessoal, Casa, Instituto, Loja). Cada um vê só as ações delegadas a ele (ou da sua frente e não delegadas a outro), o Kanban da frente, specs completas, ocupado e gaps. O user prompt manda isolar `start`/`end` no DATE e não copiar texto entre ACTIONS.
 
-Saída: `SpecialistDraft` (propostas curtas) convertido para `TimeBlockProposal` com prefixo do catálogo. `gtdActionId` inventado é descartado. Falha ou timeout → `uncovered: true` daquela frente; as outras seguem.
+Saída: `SpecialistDraft` (propostas curtas) convertido para `TimeBlockProposal` com prefixo do catálogo. `gtdActionId` inventado é descartado. `start`/`end` que não parseiam para o DATE caem fora (não viram `00:00`). Em Casa, ação sem `due` (ou `due` no DATE) é encaixada no gap pós-expediente e o cue/rationale são sanitizados contra prefixo de dia e texto de outras tarefas. Falha ou timeout → `uncovered: true` daquela frente; as outras seguem.
 
 Nenhum especialista escreve Calendar.
 

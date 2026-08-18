@@ -25,6 +25,15 @@ import {
   type UpsertFlexEventInput,
 } from "../schemas.js";
 import {
+  casaActionEligibleToday,
+  parseProposalInstant,
+  resolveCasaFlexRange,
+  sanitizeProposalCopy,
+  selectCasaFallbackAction,
+  SPECIALIST_ISOLATION_HINT,
+  stripLegacySchedulePrefix,
+} from "./proposal-guard.js";
+import {
   MASTER_CALLOUT_PROMPT,
   SPECIALIST_ORDER,
   SPECIALIST_SYSTEM_PROMPTS,
@@ -457,6 +466,7 @@ async function runSpecialist(
   const user = [
     `DATE: ${state.date}`,
     `WEEKDAY: ${weekday} (${WEEKDAY_PT[weekday]})`,
+    SPECIALIST_ISOLATION_HINT,
     `CONSTRAINTS: ${JSON.stringify(state.constraints)}`,
     `OCCUPIED: ${JSON.stringify(
       state.occupied.map((event) => ({
@@ -466,7 +476,15 @@ async function runSpecialist(
       })),
     )}`,
     `GAPS: ${JSON.stringify(state.gaps)}`,
-    `ACTIONS: ${JSON.stringify(actions)}`,
+    `ACTIONS: ${JSON.stringify(
+      actions.map((action) => ({
+        id: action.id,
+        title: action.title,
+        due: action.due,
+        contexts: action.contexts,
+        project: action.project,
+      })),
+    )}`,
     `SPECS: ${JSON.stringify(specs)}`,
     `KANBAN: ${JSON.stringify(kanban)}`,
     "Devolva SpecialistDraft JSON.",
@@ -487,9 +505,46 @@ async function runSpecialist(
 
     const proposals: TimeBlockProposal[] = [];
     for (const row of draft.proposals) {
-      const built = toProposal(state.date, agentId, front, row, actions, specs);
+      const built = toProposal(
+        state.date,
+        weekday,
+        state.gaps,
+        agentId,
+        front,
+        row,
+        actions,
+        specs,
+      );
       if (built) {
         proposals.push(built);
+      }
+    }
+
+    if (agentId === "infraestrutura_casa" && proposals.length === 0) {
+      const candidate = selectCasaFallbackAction(actions, state.date);
+      if (candidate) {
+        const built = toProposal(
+          state.date,
+          weekday,
+          state.gaps,
+          agentId,
+          front,
+          {
+            title: candidate.title.slice(0, 64),
+            start: "20:00",
+            end: "21:00",
+            cue: candidate.title,
+            gtdActionId: candidate.id,
+            energy: "media",
+            priority: 2,
+            rationale: `Ação física de hoje: ${candidate.title}`,
+          },
+          actions,
+          specs,
+        );
+        if (built) {
+          proposals.push(built);
+        }
       }
     }
 
@@ -511,8 +566,20 @@ async function runSpecialist(
             kanban.find((card) => card.id === move.cardId)?.gtdActionId ?? null,
           timeBlock: null,
         })),
-      todoistTodayIds: draft.todoistTodayIds.filter((id) => actionIds.has(id)),
-      uncovered: draft.uncovered,
+      todoistTodayIds: [
+        ...new Set([
+          ...draft.todoistTodayIds.filter((id) => actionIds.has(id)),
+          ...(agentId === "infraestrutura_casa"
+            ? proposals
+                .map((proposal) => proposal.gtdActionId)
+                .filter((id): id is string => id !== null)
+            : []),
+        ]),
+      ].slice(0, 8),
+      uncovered:
+        agentId === "infraestrutura_casa" && proposals.length > 0
+          ? false
+          : draft.uncovered,
       warnings: draft.warnings,
     };
   } catch (cause: unknown) {
@@ -528,6 +595,8 @@ async function runSpecialist(
 
 function toProposal(
   date: string,
+  weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6,
+  gaps: readonly TimeRange[],
   agentId: SpecialistAgentId,
   front: FrontId,
   draft: z.infer<typeof SpecialistDraftProposalSchema>,
@@ -543,27 +612,62 @@ function toProposal(
     return null;
   }
 
-  const spec = specs.find((item) =>
-    draft.cue.includes(item.title),
-  ) ?? null;
+  const otherTitles = actions
+    .filter((item) => item.id !== action?.id)
+    .map((item) => item.title);
+
+  const range =
+    front === "casa" && casaActionEligibleToday(action, date)
+      ? resolveCasaFlexRange({
+          date,
+          weekday,
+          gaps,
+          draftStart: draft.start,
+          draftEnd: draft.end,
+          contexts: action?.contexts ?? [],
+          title: action?.title ?? draft.title,
+        })
+      : (() => {
+          const start = parseProposalInstant(date, draft.start, weekday);
+          const end = parseProposalInstant(date, draft.end, weekday);
+          return start && end ? { start, end } : null;
+        })();
+
+  if (!range) {
+    return null;
+  }
+
+  const sourceTitle = action?.title ?? draft.title;
+  const title = stripLegacySchedulePrefix(
+    stripPrefix(catalog.prefix, draft.title),
+  );
+  const cue = sanitizeProposalCopy(draft.cue, sourceTitle, otherTitles, 140);
+  const rationale = sanitizeProposalCopy(
+    draft.rationale,
+    sourceTitle,
+    otherTitles,
+    280,
+  );
+
+  const spec =
+    front === "casa"
+      ? null
+      : (specs.find((item) => cue.includes(item.title)) ?? null);
 
   const parsed = TimeBlockProposalSchema.safeParse({
     agentId,
     front,
     prefix: catalog.prefix,
-    title: stripPrefix(catalog.prefix, draft.title),
-    range: {
-      start: parseCivil(date, draft.start),
-      end: parseCivil(date, draft.end),
-    },
+    title: (title.length >= 3 ? title : sourceTitle).slice(0, 64),
+    range,
     kind: "flex_timeblock",
     gtdActionId: draft.gtdActionId,
     spec,
-    cue: draft.cue.replaceAll("\n", " ").slice(0, 140),
+    cue,
     energy: draft.energy,
     priority: draft.priority,
     conflictsWithProtected: false,
-    rationale: draft.rationale.slice(0, 280),
+    rationale,
   });
 
   return parsed.success ? parsed.data : null;
@@ -854,21 +958,6 @@ function inferDelegation(action: GtdAction): Delegation["agentId"] {
     return FRONT_CATALOG[action.front].agentId;
   }
   return "ignore_pagbank";
-}
-
-function parseCivil(date: string, value: string): CivilInstant {
-  const trimmed = value.trim();
-  if (trimmed.includes("T")) {
-    return { iso: trimmed };
-  }
-  const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(trimmed);
-  if (!match) {
-    return { iso: `${date}T00:00:00-03:00` };
-  }
-  const hour = match[1]?.padStart(2, "0") ?? "00";
-  const minute = match[2] ?? "00";
-  const second = match[3] ?? "00";
-  return { iso: `${date}T${hour}:${minute}:${second}-03:00` };
 }
 
 function stripPrefix(prefix: string, title: string): string {
