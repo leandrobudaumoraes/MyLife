@@ -1,7 +1,9 @@
 import type { Result } from "../domain/result.js";
 import type {
+  CreateProjectEventInput,
   CreateProjectTaskInput,
   NotionPage,
+  ProjectEventBoard,
   ProjectTaskBoard,
   UpdateProjectTaskColumnInput,
   UpsertChildPageInput,
@@ -27,6 +29,8 @@ export interface NotionPort {
   updateProjectTaskColumn(
     input: UpdateProjectTaskColumnInput,
   ): Promise<Result<NotionPage>>;
+  ensureProjectEventBoard(pageId: string): Promise<Result<ProjectEventBoard>>;
+  createProjectEvent(input: CreateProjectEventInput): Promise<Result<NotionPage>>;
 }
 
 export type INotionPort = NotionPort;

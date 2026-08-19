@@ -112,6 +112,7 @@ export type NotionProjectSelect = z.infer<typeof NotionProjectSelectSchema>;
 export const UpsertProjectPageInputSchema = z.object({
   title: z.string(),
   select: NotionProjectSelectSchema.nullable(),
+  markInProgress: z.boolean().default(true),
 });
 export type UpsertProjectPageInput = z.infer<typeof UpsertProjectPageInputSchema>;
 
@@ -134,6 +135,28 @@ export const CreateProjectTaskInputSchema = z.object({
   column: KanbanColumnSchema,
 });
 export type CreateProjectTaskInput = z.infer<typeof CreateProjectTaskInputSchema>;
+
+export const ProjectEventCardSchema = z.object({
+  pageId: z.string(),
+  title: z.string(),
+});
+export type ProjectEventCard = z.infer<typeof ProjectEventCardSchema>;
+
+export const ProjectEventBoardSchema = z.object({
+  dataSourceId: z.string(),
+  events: z.array(ProjectEventCardSchema),
+});
+export type ProjectEventBoard = z.infer<typeof ProjectEventBoardSchema>;
+
+export const CreateProjectEventInputSchema = z.object({
+  dataSourceId: z.string(),
+  title: z.string(),
+  date: z.string(),
+  markdown: z.string(),
+});
+export type CreateProjectEventInput = z.infer<
+  typeof CreateProjectEventInputSchema
+>;
 
 export const UpdateProjectTaskColumnInputSchema = z.object({
   pageId: z.string(),

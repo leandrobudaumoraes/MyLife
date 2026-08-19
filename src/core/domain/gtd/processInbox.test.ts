@@ -8,6 +8,7 @@ import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { ok, type Result } from "../result.js";
 import type {
   CalendarEvent,
+  CreateProjectEventInput,
   CreateProjectTaskInput,
   CreateTodoistFilterInput,
   CreateTodoistLabelInput,
@@ -18,6 +19,8 @@ import type {
   ListEventsQuery,
   ListTasksQuery,
   NotionPage,
+  ProjectEventBoard,
+  ProjectEventCard,
   ProjectTaskBoard,
   ProjectTaskCard,
   TodoistFilter,
@@ -225,7 +228,7 @@ test("Next move para Próximas ações e tira a etiqueta de roteamento", async (
   assert.ok(moved?.labels.includes("Celular"));
 });
 
-test("Event com slot livre cria no Calendar e completa a tarefa", async () => {
+test("Event com slot livre cria no Calendar, página Notion e completa a tarefa", async () => {
   const todoist = new MemoryTodoist([
     task({
       id: "t-event",
@@ -234,15 +237,14 @@ test("Event com slot livre cria no Calendar e completa a tarefa", async () => {
     }),
   ]);
   const calendar = new MemoryCalendar();
+  const notion = new MemoryNotion();
   const result = await processInbox({
     todoist,
-    notion: new MemoryNotion(),
+    notion,
     llm: new ScriptedLlm([
-      JSON.stringify({
-        insufficient: false,
+      eventPlanJson({
         start: "2026-08-20T10:00:00-03:00",
         end: "2026-08-20T11:00:00-03:00",
-        recurrence: null,
       }),
     ]),
     tree,
@@ -258,10 +260,20 @@ test("Event com slot livre cria no Calendar e completa a tarefa", async () => {
   assert.equal(todoist.tasks[0]?.isCompleted, true);
   assert.equal(todoist.tasks[0]?.projectId, "inbox");
   assert.ok(todoist.tasks[0]?.labels.includes("Event"));
+  assert.equal(todoist.projects.filter((project) => project.parentId === "folder").length, 0);
   assert.equal(calendar.inserts.length, 1);
   assert.equal(calendar.inserts[0]?.summary, "Consulta com nutrologo");
-  assert.equal(calendar.inserts[0]?.description, null);
   assert.equal(calendar.inserts[0]?.recurrence, null);
+  assert.equal(notion.lastSelect, "Pessoal");
+  assert.equal(notion.pages[0]?.title, "Consulta com nutrólogo");
+  assert.equal(notion.pages[0]?.status, "Não iniciada");
+  assert.equal(notion.eventCards[0]?.title, "Consulta com nutrologo");
+  assert.match(calendar.inserts[0]?.description ?? "", /Cue:/);
+  assert.match(calendar.inserts[0]?.description ?? "", /Spec:/);
+  assert.match(
+    calendar.inserts[0]?.description ?? "",
+    /https:\/\/notion\.so\//,
+  );
 });
 
 test("Event com Pending não é varrido de novo", async () => {
@@ -403,11 +415,9 @@ test("dia inteiro no Calendar não conta como conflito do Event", async () => {
     todoist,
     notion: new MemoryNotion(),
     llm: new ScriptedLlm([
-      JSON.stringify({
-        insufficient: false,
+      eventPlanJson({
         start: "2026-08-20T10:00:00-03:00",
         end: null,
-        recurrence: null,
       }),
     ]),
     tree,
@@ -471,6 +481,116 @@ test("Event recorrente em conflito não cria série pela metade", async () => {
   assert.ok(todoist.tasks[0]?.labels.includes("Event"));
   assert.ok(todoist.tasks[0]?.labels.includes("Pending"));
   assert.equal(todoist.tasks[0]?.isCompleted, false);
+});
+
+test("Event associa pilar, reusa o projeto Notion e formata o corpo do Calendar", async () => {
+  const capture = task({
+    id: "t-sleep",
+    content: "Ao dormir",
+    labels: ["Event"],
+  });
+  capture.description = "Acontecerá todo dia as 22:00.";
+  const todoist = new MemoryTodoist([capture]);
+  todoist.comments.set("t-sleep", [
+    "Usar nardirin",
+    "Escovar os dentes",
+    "dipirona 5g",
+  ]);
+  const notion = new MemoryNotion();
+  notion.pages.push({
+    pageId: "np-sono",
+    title: "Melhorar o sono",
+    url: "https://notion.so/np-sono",
+    status: "Pausado",
+  });
+  const calendar = new MemoryCalendar();
+  const markdown = [
+    "> 22:00: nardirin, dentes, dipirona. Luz apagada.",
+    "",
+    "## Agora",
+    "1. Tomar nardirin.",
+    "2. Escovar os dentes.",
+    "3. Tomar dipirona 5g.",
+    "4. Apagar a luz.",
+    "",
+    "## Não",
+    "- Abrir tela nova.",
+    "- Empurrar o horário.",
+  ].join("\n");
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([
+      eventPlanJson({
+        start: "2026-08-19T22:00:00-03:00",
+        end: "2026-08-20T06:00:00-03:00",
+        recurrence: { freq: "DAILY", interval: 1, byDay: [], until: null },
+        projectName: "Melhorar o sono",
+        pageTitle: "Ao dormir",
+        cue: "22:00: nardirin, dentes, dipirona. Luz apagada.",
+        steps: [
+          "Tomar nardirin",
+          "Escovar os dentes",
+          "Tomar dipirona 5g",
+          "Apagar a luz",
+        ],
+        markdown,
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-18",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(todoist.tasks[0]?.isCompleted, true);
+  assert.equal(notion.pages.length, 1);
+  assert.equal(notion.pages[0]?.status, "Pausado");
+  assert.equal(notion.lastSelect, "Pessoal");
+  assert.equal(notion.eventCards[0]?.title, "Ao dormir");
+  assert.equal(notion.eventMarkdown.get("Ao dormir"), markdown);
+  assert.equal(calendar.inserts[0]?.summary, "Ao dormir");
+  assert.match(
+    calendar.inserts[0]?.description ?? "",
+    /Cue:<\/b> 22:00: nardirin, dentes, dipirona/,
+  );
+  assert.match(calendar.inserts[0]?.description ?? "", /1\. Tomar nardirin/);
+  assert.match(calendar.inserts[0]?.description ?? "", /Spec:/);
+});
+
+test("Event com nome de pilar não cria e trava com Pending", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Consulta com nutrologo",
+      labels: ["Event"],
+    }),
+  ]);
+  const calendar = new MemoryCalendar();
+  const result = await processInbox({
+    todoist,
+    notion: new MemoryNotion(),
+    llm: new ScriptedLlm([
+      eventPlanJson({
+        projectName: "🩺 Saúde",
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-18",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.processed[0]?.detail, "Pending: projeto ilegível");
+  assert.equal(todoist.tasks[0]?.isCompleted, false);
+  assert.ok(todoist.tasks[0]?.labels.includes("Pending"));
+  assert.equal(calendar.inserts.length, 0);
 });
 
 test("projeto Notion sem DOING promove TO DO e espelha no Todoist", async () => {
@@ -982,6 +1102,25 @@ test("Doing no Todoist retoma projeto pausado sem DOING no Notion", async () => 
   assert.equal(todoist.tasks.length, 1);
 });
 
+function eventPlanJson(
+  overrides: Record<string, unknown> = {},
+): string {
+  return JSON.stringify({
+    insufficient: false,
+    start: "2026-08-20T10:00:00-03:00",
+    end: "2026-08-20T11:00:00-03:00",
+    recurrence: null,
+    projectName: "Consulta com nutrólogo",
+    select: "Pessoal",
+    pageTitle: "Consulta com nutrologo",
+    cue: "10:00: chegar com documentos e lista de dúvidas.",
+    steps: ["Levar documentos", "Lista de dúvidas"],
+    markdown:
+      "> 10:00: chegar com documentos.\n\n## Agora\n1. Levar documentos.\n\n## Não\n- Faltar.",
+    ...overrides,
+  });
+}
+
 function task(input: {
   readonly id: string;
   readonly content: string;
@@ -1013,14 +1152,23 @@ class ScriptedLlm implements LlmPort {
 class MemoryNotion implements NotionPort {
   pages: NotionPage[] = [];
   lastSelect: UpsertProjectPageInput["select"] = null;
+  eventMarkdown = new Map<string, string>();
   private boards = new Map<
     string,
     { dataSourceId: string; cards: ProjectTaskCard[] }
+  >();
+  private eventBoards = new Map<
+    string,
+    { dataSourceId: string; cards: ProjectEventCard[] }
   >();
   private seq = 1;
 
   get cards(): ProjectTaskCard[] {
     return [...this.boards.values()].flatMap((board) => board.cards);
+  }
+
+  get eventCards(): ProjectEventCard[] {
+    return [...this.eventBoards.values()].flatMap((board) => board.cards);
   }
 
   pageStatus(pageId: string): string | null {
@@ -1070,13 +1218,20 @@ class MemoryNotion implements NotionPort {
     this.lastSelect = input.select;
     const existing = this.pages.find((page) => page.title === input.title);
     if (existing) {
+      if (input.markInProgress !== false) {
+        const updated: NotionPage = { ...existing, status: "Em andamento" };
+        this.pages = this.pages.map((item) =>
+          item.pageId === existing.pageId ? updated : item,
+        );
+        return ok(updated);
+      }
       return ok(existing);
     }
     const page: NotionPage = {
       pageId: `np${this.seq}`,
       title: input.title,
       url: `https://notion.so/np${this.seq}`,
-      status: "Em andamento",
+      status: input.markInProgress === false ? "Não iniciada" : "Em andamento",
     };
     this.seq += 1;
     this.pages.push(page);
@@ -1168,6 +1323,64 @@ class MemoryNotion implements NotionPort {
       url: `https://notion.so/${input.pageId}`,
       status: null,
     });
+  }
+
+  async ensureProjectEventBoard(
+    pageId: string,
+  ): Promise<Result<ProjectEventBoard>> {
+    const board = this.eventBoardOf(pageId);
+    return ok({ dataSourceId: board.dataSourceId, events: [...board.cards] });
+  }
+
+  async createProjectEvent(
+    input: CreateProjectEventInput,
+  ): Promise<Result<NotionPage>> {
+    const board = [...this.eventBoards.values()].find(
+      (item) => item.dataSourceId === input.dataSourceId,
+    );
+    if (!board) {
+      return ok({
+        pageId: "missing-event",
+        title: input.title,
+        url: "https://notion.so/missing-event",
+        status: null,
+      });
+    }
+    const existing = board.cards.find((card) => card.title === input.title);
+    this.eventMarkdown.set(input.title, input.markdown);
+    if (existing) {
+      return ok({
+        pageId: existing.pageId,
+        title: existing.title,
+        url: `https://notion.so/${existing.pageId}`,
+        status: null,
+      });
+    }
+    const card: ProjectEventCard = {
+      pageId: `ev${this.seq}`,
+      title: input.title,
+    };
+    this.seq += 1;
+    board.cards.push(card);
+    return ok({
+      pageId: card.pageId,
+      title: card.title,
+      url: `https://notion.so/${card.pageId}`,
+      status: null,
+    });
+  }
+
+  private eventBoardOf(pageId: string): {
+    dataSourceId: string;
+    cards: ProjectEventCard[];
+  } {
+    const existing = this.eventBoards.get(pageId);
+    if (existing) {
+      return existing;
+    }
+    const created = { dataSourceId: `evds-${pageId}`, cards: [] };
+    this.eventBoards.set(pageId, created);
+    return created;
   }
 
   private boardOf(pageId: string): {

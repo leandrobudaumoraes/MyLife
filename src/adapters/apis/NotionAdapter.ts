@@ -16,15 +16,22 @@ import {
 import { inject, injectable } from "inversify";
 
 import { err, ok, type Result } from "../../core/domain/result.js";
-import { NOTION_PROJECT_STATUS_IN_PROGRESS } from "../../core/domain/gtd/catalog.js";
+import {
+  NOTION_EVENTS_DB_TITLE,
+  NOTION_PROJECT_STATUS_IN_PROGRESS,
+  NOTION_PROJECT_STATUS_NOT_STARTED,
+} from "../../core/domain/gtd/catalog.js";
 import {
   KanbanColumnSchema,
   NotionPageSchema,
+  type CreateProjectEventInput,
   type CreateProjectTaskInput,
   type IntegrationConfig,
   type IntegrationError,
   type KanbanColumn,
   type NotionPage,
+  type ProjectEventBoard,
+  type ProjectEventCard,
   type ProjectTaskBoard,
   type ProjectTaskCard,
   type UpdateProjectTaskColumnInput,
@@ -147,7 +154,7 @@ export class NotionAdapter implements NotionPort {
       }
       const existing = pages.value.find((page) => page.title === input.title);
       const pageId = existing
-        ? await this.writeProjectInProgress(existing.pageId, input.select)
+        ? await this.writeExistingProjectPage(existing.pageId, input)
         : await this.createProjectPage(input);
       const page = await this.getPage(pageId);
       if (!page.ok) {
@@ -254,6 +261,62 @@ export class NotionAdapter implements NotionPort {
     }
   }
 
+  async ensureProjectEventBoard(
+    pageId: string,
+  ): Promise<Result<ProjectEventBoard>> {
+    const started = Date.now();
+    try {
+      const databaseId =
+        (await this.findChildDatabaseId(pageId, NOTION_EVENTS_DB_TITLE)) ??
+        (await this.createEventsDatabase(pageId));
+      const dataSourceId = await this.dataSourceIdOf(databaseId);
+      const events = await this.listDataSourceEvents(dataSourceId);
+      console.log("[NotionAdapter.ensureProjectEventBoard]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        pageId,
+      });
+      return ok({ dataSourceId, events });
+    } catch (cause: unknown) {
+      return this.fail("ensureProjectEventBoard", started, cause);
+    }
+  }
+
+  async createProjectEvent(
+    input: CreateProjectEventInput,
+  ): Promise<Result<NotionPage>> {
+    const started = Date.now();
+    try {
+      const dataSource = await this.client.dataSources.retrieve({
+        data_source_id: input.dataSourceId,
+      });
+      if (!isFullDataSource(dataSource)) {
+        throw new Error("Data source de Eventos incompleto");
+      }
+      const titleName = titlePropertyName(dataSource.properties);
+      const dateName = datePropertyName(dataSource.properties);
+      const existing = await this.findEventPageId(
+        input.dataSourceId,
+        input.title,
+      );
+      const pageId = existing
+        ? await this.replaceEventPage(existing, dateName, input)
+        : await this.createEventPage(titleName, dateName, input);
+      const page = await this.getPage(pageId);
+      if (!page.ok) {
+        return page;
+      }
+      console.log("[NotionAdapter.createProjectEvent]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        pageId,
+      });
+      return page;
+    } catch (cause: unknown) {
+      return this.fail("createProjectEvent", started, cause);
+    }
+  }
+
   async updateProjectTaskColumn(
     input: UpdateProjectTaskColumnInput,
   ): Promise<Result<NotionPage>> {
@@ -315,6 +378,9 @@ export class NotionAdapter implements NotionPort {
     input: UpsertProjectPageInput,
   ): Promise<string> {
     const databaseId = requireNotionProjectsDbId();
+    const status = input.markInProgress !== false
+      ? NOTION_PROJECT_STATUS_IN_PROGRESS
+      : NOTION_PROJECT_STATUS_NOT_STARTED;
     const properties: Record<
       string,
       | { title: Array<{ type: "text"; text: { content: string } }> }
@@ -324,7 +390,7 @@ export class NotionAdapter implements NotionPort {
       "Nome do Projeto": {
         title: [{ type: "text", text: { content: input.title } }],
       },
-      Status: { status: { name: NOTION_PROJECT_STATUS_IN_PROGRESS } },
+      Status: { status: { name: status } },
     };
     if (input.select) {
       properties.Selecionar = { select: { name: input.select } };
@@ -334,6 +400,24 @@ export class NotionAdapter implements NotionPort {
       properties,
     });
     return created.id;
+  }
+
+  private async writeExistingProjectPage(
+    pageId: string,
+    input: UpsertProjectPageInput,
+  ): Promise<string> {
+    if (input.markInProgress !== false) {
+      return this.writeProjectInProgress(pageId, input.select);
+    }
+    if (input.select) {
+      await this.client.pages.update({
+        page_id: pageId,
+        properties: {
+          Selecionar: { select: { name: input.select } },
+        },
+      });
+    }
+    return pageId;
   }
 
   private async writeProjectInProgress(
@@ -360,16 +444,118 @@ export class NotionAdapter implements NotionPort {
     const blocks = await collectPaginatedAPI(this.client.blocks.children.list, {
       block_id: pageId,
     });
+    const untitled: string[] = [];
     for (const block of blocks) {
-      if (
-        isFullBlock(block) &&
-        block.type === "child_database" &&
-        block.child_database.title === title
-      ) {
+      if (!isFullBlock(block) || block.type !== "child_database") {
+        continue;
+      }
+      if (block.child_database.title === title) {
         return block.id;
+      }
+      if (block.child_database.title.length === 0) {
+        untitled.push(block.id);
+      }
+    }
+    for (const databaseId of untitled) {
+      const database = await this.client.databases.retrieve({
+        database_id: databaseId,
+      });
+      const retrievedTitle = isFullDatabase(database)
+        ? database.title.map((item) => item.plain_text).join("")
+        : "";
+      if (retrievedTitle === title) {
+        return databaseId;
       }
     }
     return null;
+  }
+
+  private async createEventsDatabase(pageId: string): Promise<string> {
+    const created = await this.client.databases.create({
+      parent: { type: "page_id", page_id: pageId },
+      title: [{ type: "text", text: { content: NOTION_EVENTS_DB_TITLE } }],
+      is_inline: true,
+      initial_data_source: {
+        properties: {
+          Nome: { type: "title", title: {} },
+          Quando: { type: "date", date: {} },
+        },
+      },
+    });
+    if (!isFullDatabase(created)) {
+      throw new Error("Banco Eventos incompleto");
+    }
+    return created.id;
+  }
+
+  private async listDataSourceEvents(
+    dataSourceId: string,
+  ): Promise<ProjectEventCard[]> {
+    const events: ProjectEventCard[] = [];
+    let cursor: string | null = null;
+    do {
+      const response = await this.client.dataSources.query({
+        data_source_id: dataSourceId,
+        page_size: 100,
+        ...(cursor ? { start_cursor: cursor } : {}),
+      });
+      for (const result of response.results) {
+        if (!isFullPage(result)) {
+          continue;
+        }
+        events.push({
+          pageId: result.id,
+          title: readAnyTitle(result),
+        });
+      }
+      cursor = response.has_more ? response.next_cursor : null;
+    } while (cursor);
+    return events;
+  }
+
+  private async findEventPageId(
+    dataSourceId: string,
+    title: string,
+  ): Promise<string | null> {
+    const events = await this.listDataSourceEvents(dataSourceId);
+    return events.find((event) => event.title === title)?.pageId ?? null;
+  }
+
+  private async createEventPage(
+    titleName: string,
+    dateName: string | null,
+    input: CreateProjectEventInput,
+  ): Promise<string> {
+    const properties: Record<string, unknown> = {
+      [titleName]: {
+        title: [{ type: "text", text: { content: input.title } }],
+      },
+    };
+    if (dateName) {
+      properties[dateName] = { date: { start: input.date } };
+    }
+    const created = await this.client.pages.create({
+      parent: { data_source_id: input.dataSourceId },
+      properties: properties as never,
+      markdown: input.markdown,
+    });
+    return created.id;
+  }
+
+  private async replaceEventPage(
+    pageId: string,
+    dateName: string | null,
+    input: CreateProjectEventInput,
+  ): Promise<string> {
+    if (dateName) {
+      await this.client.pages.update({
+        page_id: pageId,
+        properties: {
+          [dateName]: { date: { start: input.date } },
+        },
+      });
+    }
+    return this.replaceMarkdown(pageId, input.markdown);
   }
 
   private async createTasksDatabase(pageId: string): Promise<string> {
@@ -590,7 +776,7 @@ function toPage(page: PageObjectResponse): NotionPage {
   return NotionPageSchema.parse({
     pageId: page.id,
     title: readAnyTitle(page),
-    url: page.url,
+    url: notionPageUrl(page.id),
     status: readProjectStatus(page),
   });
 }
@@ -621,6 +807,22 @@ function titlePropertyName(
     }
   }
   return "Nome";
+}
+
+function datePropertyName(
+  properties: Record<string, { type: string; name: string }>,
+): string | null {
+  for (const property of Object.values(properties)) {
+    if (property.type === "date" && property.name === "Quando") {
+      return property.name;
+    }
+  }
+  for (const property of Object.values(properties)) {
+    if (property.type === "date") {
+      return property.name;
+    }
+  }
+  return null;
 }
 
 function statusPropertyName(

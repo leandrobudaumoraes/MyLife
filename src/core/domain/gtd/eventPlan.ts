@@ -9,9 +9,12 @@ import {
   EventRecurrenceSchema,
   type CalendarEvent,
   type EventRecurrence,
+  type NotionProjectSelect,
   type TimeRange,
   type WeekdayCode,
 } from "../schemas.js";
+import { isReservedProjectName } from "./catalog.js";
+import { normalizeProjectSelect } from "./projectPlan.js";
 
 const WEEKDAY_CODES: readonly WeekdayCode[] = [
   "SU",
@@ -31,15 +34,37 @@ export const EventSlotSchema = z.object({
   start: z.string().nullable(),
   end: z.string().nullable(),
   recurrence: EventRecurrenceSchema.nullable().default(null),
+  projectName: z.string().trim().default(""),
+  select: z
+    .unknown()
+    .optional()
+    .transform((value) => normalizeProjectSelect(value)),
+  pageTitle: z.string().trim().default(""),
+  cue: z.string().trim().default(""),
+  markdown: z.string().trim().default(""),
+  steps: z.array(z.string().trim().min(1)).default([]),
 });
 export type EventSlot = z.infer<typeof EventSlotSchema>;
+
+export type HydratedEventPage = {
+  readonly projectName: string;
+  readonly select: NotionProjectSelect;
+  readonly pageTitle: string;
+  readonly cue: string;
+  readonly markdown: string;
+  readonly steps: readonly string[];
+};
+
+const MAX_EVENT_STEPS = 7;
 
 export type ResolvedEventSlot = {
   readonly range: TimeRange;
   readonly recurrence: EventRecurrence | null;
 };
 
-export function resolveEventSlot(slot: EventSlot): ResolvedEventSlot | null {
+export function resolveEventSlot(
+  slot: Pick<EventSlot, "insufficient" | "start" | "end" | "recurrence">,
+): ResolvedEventSlot | null {
   if (slot.insufficient) {
     return null;
   }
@@ -101,6 +126,105 @@ export function findConflict(
     }
   }
   return null;
+}
+
+export function hydrateEventPage(
+  plan: EventSlot,
+  task: { readonly content: string; readonly description: string },
+  comments: readonly string[],
+): HydratedEventPage | null {
+  if (!isUsableEventProject(plan.projectName)) {
+    return null;
+  }
+  const pageTitle = plan.pageTitle || task.content.trim();
+  const steps = limitEventSteps(
+    plan.steps.length > 0 ? plan.steps : comments,
+  );
+  const cue = plan.cue || fallbackCue(task, comments);
+  const markdown =
+    plan.markdown || fallbackEventMarkdown({ pageTitle, cue, steps });
+  if (pageTitle.length === 0 || cue.length === 0) {
+    return null;
+  }
+  return {
+    projectName: plan.projectName,
+    select: plan.select,
+    pageTitle,
+    cue,
+    markdown,
+    steps,
+  };
+}
+
+export function isUsableEventProject(name: string): boolean {
+  return name.length > 0 && !isReservedProjectName(name);
+}
+
+export function calendarEventBody(input: {
+  readonly cue: string;
+  readonly steps: readonly string[];
+  readonly specUrl: string;
+  readonly specTitle: string;
+}): string {
+  const cue = escapeHtml(input.cue.trim());
+  const steps = limitEventSteps(input.steps);
+  const list =
+    steps.length === 0
+      ? ""
+      : `<br>${steps
+          .map((step, index) => `${index + 1}. ${escapeHtml(step)}`)
+          .join("<br>")}<br>`;
+  return `<b>Cue:</b> ${cue}${list}<br><b>Spec:</b> <a href="${escapeHtml(input.specUrl)}">${escapeHtml(input.specTitle)}</a>`;
+}
+
+export function fallbackEventMarkdown(input: {
+  readonly pageTitle: string;
+  readonly cue: string;
+  readonly steps: readonly string[];
+}): string {
+  const steps =
+    input.steps.length > 0 ? input.steps : [input.cue || input.pageTitle];
+  const agora = steps
+    .map((step, index) => `${index + 1}. ${step}`)
+    .join("\n");
+  return [
+    `> ${input.cue}`,
+    "",
+    "## Agora",
+    agora,
+    "",
+    "## Não",
+    "- Abrir tela nova neste bloco.",
+    "- Transformar isto em tarefa do Todoist.",
+  ].join("\n");
+}
+
+function fallbackCue(
+  task: { readonly content: string; readonly description: string },
+  comments: readonly string[],
+): string {
+  const description = firstLine(task.description);
+  if (description.length > 0) {
+    return description;
+  }
+  const comment = comments.map(firstLine).find((line) => line.length > 0);
+  return comment ?? task.content.trim();
+}
+
+function limitEventSteps(steps: readonly string[]): string[] {
+  return steps.map((step) => step.trim()).filter(Boolean).slice(0, MAX_EVENT_STEPS);
+}
+
+function firstLine(value: string): string {
+  return value.split(/\r?\n/)[0]?.trim() ?? "";
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 export function conflictComment(event: CalendarEvent): string {

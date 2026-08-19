@@ -2,7 +2,7 @@ import type { CalendarPort } from "../../ports/CalendarPort.js";
 import type { LlmPort } from "../../ports/LlmPort.js";
 import type { NotionPort } from "../../ports/NotionPort.js";
 import type { TodoistPort } from "../../ports/TodoistPort.js";
-import { civilDateNow } from "../clock.js";
+import { civilDateNow, civilDateOfIso } from "../clock.js";
 import { ok, type Result } from "../result.js";
 import {
   InboxRunSchema,
@@ -21,11 +21,13 @@ import {
 } from "./catalog.js";
 import type { GtdTree } from "./ensure.js";
 import {
+  calendarEventBody,
   conflictComment,
   conflictWindow,
   expandOccurrences,
   EventSlotSchema,
   findConflict,
+  hydrateEventPage,
   resolveEventSlot,
 } from "./eventPlan.js";
 import { extractJson } from "./json.js";
@@ -123,6 +125,7 @@ export async function processInbox(input: {
         const detail = await processEvent(
           {
             todoist: input.todoist,
+            notion: input.notion,
             llm: input.llm,
             calendar: input.calendar,
             calendarId: input.calendarId,
@@ -185,6 +188,7 @@ export async function processInbox(input: {
 async function processEvent(
   input: {
     readonly todoist: TodoistPort;
+    readonly notion: NotionPort;
     readonly llm: LlmPort;
     readonly calendar: CalendarPort;
     readonly calendarId: string;
@@ -197,8 +201,22 @@ async function processEvent(
     throw new Error(comments.error.message);
   }
 
+  const notionProjects = await input.notion.listDatabasePages();
+  if (!notionProjects.ok) {
+    return abortEvent(
+      input.todoist,
+      task,
+      `Notion falhou (${notionProjects.error.message})`,
+    );
+  }
+
   const reply = await input.llm.complete(
-    eventSlotPrompt({ task, comments: comments.value, today: input.today }),
+    eventSlotPrompt({
+      task,
+      comments: comments.value,
+      today: input.today,
+      existingProjectNames: notionProjects.value.map((page) => page.title),
+    }),
   );
   if (!reply.ok) {
     throw new Error(reply.error.message);
@@ -232,12 +250,60 @@ async function processEvent(
     return abortEvent(input.todoist, task, conflictComment(conflict));
   }
 
+  const page = hydrateEventPage(slot, task, comments.value);
+  if (!page) {
+    return abortEvent(input.todoist, task, "projeto ilegível");
+  }
+
+  const notionPage = await input.notion.upsertProjectPage({
+    title: page.projectName,
+    select: page.select,
+    markInProgress: false,
+  });
+  if (!notionPage.ok) {
+    return abortEvent(
+      input.todoist,
+      task,
+      `Notion falhou (${notionPage.error.message})`,
+    );
+  }
+
+  const board = await input.notion.ensureProjectEventBoard(
+    notionPage.value.pageId,
+  );
+  if (!board.ok) {
+    return abortEvent(
+      input.todoist,
+      task,
+      `histórico Notion falhou (${board.error.message})`,
+    );
+  }
+
+  const eventPage = await input.notion.createProjectEvent({
+    dataSourceId: board.value.dataSourceId,
+    title: page.pageTitle,
+    date: civilDateOfIso(resolved.range.start.iso),
+    markdown: page.markdown,
+  });
+  if (!eventPage.ok) {
+    return abortEvent(
+      input.todoist,
+      task,
+      `página do evento falhou (${eventPage.error.message})`,
+    );
+  }
+
   const created = await input.calendar.upsertEvent({
     eventId: null,
     calendarId: input.calendarId,
     summary: task.content,
     range: resolved.range,
-    description: null,
+    description: calendarEventBody({
+      cue: page.cue,
+      steps: page.steps,
+      specUrl: eventPage.value.url,
+      specTitle: page.pageTitle,
+    }),
     recurrence: resolved.recurrence,
   });
   if (!created.ok) {
@@ -245,7 +311,7 @@ async function processEvent(
   }
 
   await requireOk(input.todoist.completeTask(task.id));
-  return `${task.content} · ${resolved.range.start.iso}–${resolved.range.end.iso}`;
+  return `${task.content} · ${page.projectName} · ${resolved.range.start.iso}–${resolved.range.end.iso}`;
 }
 
 async function abortEvent(
@@ -376,6 +442,7 @@ async function processProject(
   const notionPage = await input.notion.upsertProjectPage({
     title: project.name,
     select: plan.select,
+    markInProgress: true,
   });
   if (!notionPage.ok) {
     return {

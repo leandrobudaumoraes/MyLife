@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  calendarEventBody,
   conflictWindow,
   expandOccurrences,
   findConflict,
+  hydrateEventPage,
+  isUsableEventProject,
   resolveEventSlot,
 } from "./eventPlan.js";
 import type { CalendarEvent } from "../schemas.js";
@@ -73,6 +76,43 @@ test("intervalo [início, fim) não conflita no instante do fim", () => {
     ],
   );
   assert.equal(conflict, null);
+});
+
+test("cue + passos viram HTML curto no Calendar", () => {
+  const body = calendarEventBody({
+    cue: "22:00: nardirin, dentes, dipirona. Luz apagada.",
+    steps: ["Tomar nardirin", "Escovar os dentes", "Tomar dipirona 5g"],
+    specUrl: "https://notion.so/ao-dormir",
+    specTitle: "Ao dormir",
+  });
+  assert.match(body, /<b>Cue:<\/b> 22:00: nardirin/);
+  assert.match(body, /1\. Tomar nardirin/);
+  assert.match(body, /<b>Spec:<\/b> <a href="https:\/\/notion.so\/ao-dormir">Ao dormir<\/a>/);
+});
+
+test("página do evento reusa o projeto e não aceita nome de pilar", () => {
+  const slot = {
+    insufficient: false,
+    start: "2026-08-19T22:00:00-03:00",
+    end: "2026-08-20T06:00:00-03:00",
+    recurrence: { freq: "DAILY" as const, interval: 1, byDay: [], until: null },
+    projectName: "Melhorar o sono",
+    select: "Pessoal" as const,
+    pageTitle: "",
+    cue: "22:00: nardirin, dentes, dipirona. Luz apagada.",
+    markdown: "",
+    steps: ["Tomar nardirin", "Escovar os dentes"],
+  };
+  const page = hydrateEventPage(
+    slot,
+    { content: "Ao dormir", description: "Acontecerá todo dia as 22:00." },
+    ["Usar nardirin"],
+  );
+  assert.equal(page?.projectName, "Melhorar o sono");
+  assert.equal(page?.pageTitle, "Ao dormir");
+  assert.match(page?.markdown ?? "", /## Agora/);
+  assert.equal(isUsableEventProject("🩺 Saúde"), false);
+  assert.equal(isUsableEventProject(""), false);
 });
 
 test("dia inteiro não entra no conflito", () => {

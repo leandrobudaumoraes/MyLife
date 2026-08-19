@@ -23,7 +23,7 @@ Ou o wrapper de cron:
 bash src/run-life.sh
 ```
 
-A corrida **materializa o GTD** (projetos, o catálogo de etiquetas — inclusive `Event` e `Pending` — e o filtro `Pendentes`), processa a Inbox (`Next` / `Maybe` / `Archive` / `Project` / `Event`) e, se um PARA no Todoist ficou vazio (tarefa concluída lá), fecha a `DOING` no Notion e sobe a próxima. Lock em `/tmp/life-os-daily-{date}.lock` impede segunda corrida no mesmo dia (`LIFE_OS_FORCE=1` reabre).
+A corrida **materializa o GTD** (projetos, o catálogo de etiquetas — inclusive `Event` e `Pending` — e o filtro `Pendentes`), processa a Inbox (`Next` / `Maybe` / `Archive` / `Project` / `Event`) e, se um PARA no Todoist ficou vazio (tarefa concluída lá), fecha a `DOING` no Notion e sobe a próxima. `Event` ainda grava a página no histórico `Eventos` do projeto Notion e o cue no Calendar. Lock em `/tmp/life-os-daily-{date}.lock` impede segunda corrida no mesmo dia (`LIFE_OS_FORCE=1` reabre).
 
 | Script | Situação |
 |---|---|
