@@ -2,7 +2,7 @@
 
 Esqueleto Node.js / TypeScript para orquestrar **Todoist**, **Notion**, **Google Calendar** e um **LLM** (LangChain + LangGraph).
 
-Não há regras de negócio neste repositório. O que existe é a infraestrutura: portas, adaptadores com SDKs oficiais, Inversify e um grafo LangGraph de um nó.
+Não há regras de orquestração implementadas. O contrato começa em [`docs/specs`](docs/specs): a primeira nota é o [fluxo Todoist](docs/specs/01-todoist-fluxo.md) (rascunho).
 
 ---
 

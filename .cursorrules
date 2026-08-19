@@ -1,6 +1,6 @@
 # Life OS — regras de contexto
 
-Este repositório é o **Life OS** do Leandro: um sistema em **Node.js** e **TypeScript** (Linux Debian) com conexões a Todoist, Notion, Google Calendar e um LLM. O domínio de produto ainda não está definido — o código é um **esqueleto** (portas, adaptadores, DI, grafo LangGraph).
+Este repositório é o **Life OS** do Leandro: um sistema em **Node.js** e **TypeScript** (Linux Debian) com conexões a Todoist, Notion, Google Calendar e um LLM. O código hoje é um **esqueleto** (portas, adaptadores, DI, grafo LangGraph). O contrato de produto volta a viver em `/docs/specs`.
 
 ## Stack e arquitetura
 
@@ -16,4 +16,5 @@ Este repositório é o **Life OS** do Leandro: um sistema em **Node.js** e **Typ
 - Hexágono: `src/core` (domínio + portas + grafo) → `src/adapters/apis` → `src/infrastructure/di`.
 - Entrada: `src/test-run.ts` e `src/index.ts` (wrapper `src/run-life.sh`).
 - Cada adaptador implementa uma porta. Testes mockam portas, não HTTP.
-- Idioma do produto: português (Brasil). Identificadores de código: inglês.
+- Contrato em construção: `/docs/specs`. Não implementar regra que a spec ainda marca como rascunho ou decisão em aberto.
+- Idioma do produto e das specs: português (Brasil). Identificadores de código: inglês.
