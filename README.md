@@ -2,7 +2,7 @@
 
 Esqueleto Node.js / TypeScript para orquestrar **Todoist**, **Notion**, **Google Calendar** e um **LLM** (LangChain + LangGraph).
 
-Não há regras de orquestração implementadas. O contrato começa em [`docs/specs`](docs/specs): a primeira nota é o [fluxo Todoist](docs/specs/01-todoist-fluxo.md).
+Não há regras de Calendar nesta corrida. O contrato está em [`docs/specs`](docs/specs): a primeira nota é o [fluxo Todoist](docs/specs/01-todoist-fluxo.md).
 
 ---
 
@@ -15,13 +15,15 @@ npm install
 npx tsx src/test-run.ts
 ```
 
+Se o lock do dia já fechou: `LIFE_OS_FORCE=1 npx tsx src/test-run.ts`.
+
 Ou o wrapper de cron:
 
 ```bash
 bash src/run-life.sh
 ```
 
-A corrida faz um **smoke check** só-leitura: lista projetos Todoist, páginas do banco Notion, eventos do dia no Calendar, ping no LLM e um invoke no grafo. Lock em `/tmp/life-os-daily-{date}.lock` impede segunda corrida no mesmo dia (`LIFE_OS_FORCE=1` reabre).
+A corrida **materializa o GTD** (projetos e etiquetas, inclusive `Project`) e processa a Inbox: `Next` / `Maybe` / `Archive` / `Project`. Lock em `/tmp/life-os-daily-{date}.lock` impede segunda corrida no mesmo dia (`LIFE_OS_FORCE=1` reabre).
 
 | Script | Situação |
 |---|---|

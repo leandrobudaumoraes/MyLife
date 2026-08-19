@@ -4,6 +4,7 @@ import {
   TodoistApi,
   TodoistArgumentError,
   TodoistRequestError,
+  type ColorKey,
   type GetTasksArgs,
   type PersonalProject,
   type Task,
@@ -13,12 +14,19 @@ import { inject, injectable } from "inversify";
 
 import { err, ok, type Result } from "../../core/domain/result.js";
 import {
+  TodoistLabelSchema,
   TodoistProjectSchema,
   TodoistTaskSchema,
+  type CreateTodoistLabelInput,
+  type CreateTodoistProjectInput,
+  type CreateTodoistTaskInput,
   type IntegrationConfig,
   type IntegrationError,
+  type ListTasksQuery,
+  type TodoistLabel,
   type TodoistProject,
   type TodoistTask,
+  type UpdateTodoistTaskPatch,
 } from "../../core/domain/schemas.js";
 import type { TodoistPort } from "../../core/ports/TodoistPort.js";
 import { TOKENS } from "../../core/ports/tokens.js";
@@ -32,10 +40,13 @@ export class TodoistAdapter implements TodoistPort {
     this.client = new TodoistApi(config.todoistToken);
   }
 
-  async listTasks(): Promise<Result<readonly TodoistTask[]>> {
+  async listTasks(
+    query?: ListTasksQuery,
+  ): Promise<Result<readonly TodoistTask[]>> {
     const started = Date.now();
     try {
-      const tasks = await this.collectTasks();
+      const args: GetTasksArgs = query ? { projectId: query.projectId } : {};
+      const tasks = await this.collectTasks(args);
       const mapped = tasks.map(toTask);
       console.log("[TodoistAdapter.listTasks]", {
         ok: true,
@@ -108,6 +119,7 @@ export class TodoistAdapter implements TodoistPort {
         TodoistProjectSchema.parse({
           id: project.id,
           name: project.name,
+          parentId: "parentId" in project ? project.parentId : null,
           inboxProject:
             project.id === user.inboxProjectId || isInboxProject(project),
         }),
@@ -121,6 +133,199 @@ export class TodoistAdapter implements TodoistPort {
     } catch (cause: unknown) {
       return this.fail("listProjects", started, cause);
     }
+  }
+
+  async createProject(
+    input: CreateTodoistProjectInput,
+  ): Promise<Result<TodoistProject>> {
+    return this.enqueueWrite(async () => {
+      const started = Date.now();
+      try {
+        const created = await this.withRetry(() =>
+          this.client.addProject(
+            input.parentId
+              ? { name: input.name, parentId: input.parentId }
+              : { name: input.name },
+          ),
+        );
+        const project = TodoistProjectSchema.parse({
+          id: created.id,
+          name: created.name,
+          parentId: "parentId" in created ? created.parentId : null,
+          inboxProject: isInboxProject(created),
+        });
+        console.log("[TodoistAdapter.createProject]", {
+          ok: true,
+          durationMs: Date.now() - started,
+          name: project.name,
+        });
+        return ok(project);
+      } catch (cause: unknown) {
+        return this.fail("createProject", started, cause);
+      }
+    });
+  }
+
+  async listLabels(): Promise<Result<readonly TodoistLabel[]>> {
+    const started = Date.now();
+    try {
+      const labels = await this.collectLabels();
+      const mapped = labels.map((label) =>
+        TodoistLabelSchema.parse({
+          id: label.id,
+          name: label.name,
+          color: label.color,
+        }),
+      );
+      console.log("[TodoistAdapter.listLabels]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        count: mapped.length,
+      });
+      return ok(mapped);
+    } catch (cause: unknown) {
+      return this.fail("listLabels", started, cause);
+    }
+  }
+
+  async createLabel(
+    input: CreateTodoistLabelInput,
+  ): Promise<Result<TodoistLabel>> {
+    return this.enqueueWrite(async () => {
+      const started = Date.now();
+      try {
+        const created = await this.withRetry(() =>
+          this.client.addLabel({
+            name: input.name,
+            color: asColorKey(input.color),
+          }),
+        );
+        const label = TodoistLabelSchema.parse({
+          id: created.id,
+          name: created.name,
+          color: created.color,
+        });
+        console.log("[TodoistAdapter.createLabel]", {
+          ok: true,
+          durationMs: Date.now() - started,
+          name: label.name,
+        });
+        return ok(label);
+      } catch (cause: unknown) {
+        return this.fail("createLabel", started, cause);
+      }
+    });
+  }
+
+  async listTaskComments(taskId: string): Promise<Result<readonly string[]>> {
+    const started = Date.now();
+    try {
+      const comments: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await this.withRetry(() =>
+          this.client.getComments(
+            cursor
+              ? { taskId, cursor, limit: 200 }
+              : { taskId, limit: 200 },
+          ),
+        );
+        comments.push(...page.results.map((comment) => comment.content));
+        cursor = page.nextCursor;
+      } while (cursor);
+      console.log("[TodoistAdapter.listTaskComments]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        taskId,
+        count: comments.length,
+      });
+      return ok(comments);
+    } catch (cause: unknown) {
+      return this.fail("listTaskComments", started, cause);
+    }
+  }
+
+  async updateTask(
+    id: string,
+    patch: UpdateTodoistTaskPatch,
+  ): Promise<Result<TodoistTask>> {
+    return this.enqueueWrite(async () => {
+      const started = Date.now();
+      try {
+        await this.withRetry(() =>
+          this.client.updateTask(id, {
+            ...(patch.content === undefined ? {} : { content: patch.content }),
+            ...(patch.labels === undefined ? {} : { labels: [...patch.labels] }),
+          }),
+        );
+        return await this.getTask(id);
+      } catch (cause: unknown) {
+        return this.fail("updateTask", started, cause);
+      }
+    });
+  }
+
+  async moveTask(
+    id: string,
+    projectId: string,
+  ): Promise<Result<TodoistTask>> {
+    return this.enqueueWrite(async () => {
+      const started = Date.now();
+      try {
+        await this.withRetry(() => this.client.moveTask(id, { projectId }));
+        return await this.getTask(id);
+      } catch (cause: unknown) {
+        return this.fail("moveTask", started, cause);
+      }
+    });
+  }
+
+  async createTask(
+    input: CreateTodoistTaskInput,
+  ): Promise<Result<TodoistTask>> {
+    return this.enqueueWrite(async () => {
+      const started = Date.now();
+      try {
+        const created = await this.withRetry(() =>
+          this.client.addTask({
+            content: input.content,
+            projectId: input.projectId,
+            labels: [...input.labels],
+          }),
+        );
+        console.log("[TodoistAdapter.createTask]", {
+          ok: true,
+          durationMs: Date.now() - started,
+          id: created.id,
+        });
+        return ok(toTask(created));
+      } catch (cause: unknown) {
+        return this.fail("createTask", started, cause);
+      }
+    });
+  }
+
+  private async collectLabels(): Promise<TodoistLabel[]> {
+    const results: TodoistLabel[] = [];
+    let cursor: string | null = null;
+    do {
+      const page = await this.withRetry(() =>
+        this.client.getLabels(
+          cursor ? { cursor, limit: 200 } : { limit: 200 },
+        ),
+      );
+      results.push(
+        ...page.results.map((label) =>
+          TodoistLabelSchema.parse({
+            id: label.id,
+            name: label.name,
+            color: label.color,
+          }),
+        ),
+      );
+      cursor = page.nextCursor;
+    } while (cursor);
+    return results;
   }
 
   private async collectTasks(args: GetTasksArgs = {}): Promise<Task[]> {
@@ -209,6 +414,7 @@ function toTask(task: Task): TodoistTask {
   return TodoistTaskSchema.parse({
     id: task.id,
     content: task.content,
+    description: task.description,
     projectId: task.projectId,
     sectionId: task.sectionId,
     labels: task.labels,
@@ -221,6 +427,10 @@ function toTask(task: Task): TodoistTask {
 
 function isInboxProject(project: PersonalProject | WorkspaceProject): boolean {
   return "inboxProject" in project && project.inboxProject === true;
+}
+
+function asColorKey(color: string): ColorKey {
+  return color as ColorKey;
 }
 
 function mapTodoistError(cause: unknown): IntegrationError {

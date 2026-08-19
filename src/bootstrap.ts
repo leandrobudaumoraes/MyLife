@@ -10,7 +10,7 @@ import {
   releaseDailyLock,
 } from "./infrastructure/daily-lock.js";
 
-export async function runSmokeCheck(): Promise<void> {
+export async function runLifeOs(): Promise<void> {
   const date = civilDateNow();
   const lock = acquireDailyLock({
     date,
@@ -25,7 +25,7 @@ export async function runSmokeCheck(): Promise<void> {
   const lifeOs = container.get(LifeOs);
 
   try {
-    const result = await lifeOs.smokeCheck();
+    const result = await lifeOs.run();
     console.dir(result, { depth: null });
     releaseDailyLock(lock.handle, result.ok ? "done" : "failed");
     if (!result.ok) {

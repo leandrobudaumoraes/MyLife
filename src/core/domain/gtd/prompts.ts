@@ -1,0 +1,60 @@
+import type { TodoistTask } from "../schemas.js";
+import {
+  CONTEXT_LABELS,
+  GTD_ARCHIVE,
+  GTD_INCUBATE,
+  GTD_NEXT_ACTIONS,
+  PILLAR_PROJECTS,
+} from "./catalog.js";
+
+
+export function nextRewritePrompt(task: TodoistTask): string {
+  return [
+    "Reescreva esta captura da Inbox do Todoist como UMA próxima ação GTD.",
+    "Responda só JSON: {\"title\":\"...\",\"labels\":[...]}",
+    "title: verbo no infinitivo + objeto concreto, completável numa sessão.",
+    `labels: só entre ${CONTEXT_LABELS.join(", ")}. No máximo uma localização, uma energia, Compra só se for compra. Dúvida: omita.`,
+    "Não use nome de pilar. Não invente etiqueta.",
+    "",
+    `Título: ${task.content}`,
+    `Descrição: ${task.description}`,
+    `Etiquetas atuais: ${task.labels.join(", ") || "(nenhuma)"}`,
+  ].join("\n");
+}
+
+export function projectPlanPrompt(input: {
+  readonly task: TodoistTask;
+  readonly comments: readonly string[];
+  readonly existingParaNames: readonly string[];
+}): string {
+  const comments =
+    input.comments.length === 0
+      ? "(nenhum)"
+      : input.comments.map((comment) => `- ${comment}`).join("\n");
+  const existing =
+    input.existingParaNames.length === 0
+      ? "(nenhum)"
+      : input.existingParaNames.map((name) => `- ${name}`).join("\n");
+
+  return [
+    "Esta captura da Inbox Todoist tem a etiqueta Project: é um projeto PARA, não uma próxima ação.",
+    "Analise título, descrição e comentários. O título da captura NÃO é, por padrão, o nome do projeto.",
+    "Responda só JSON:",
+    '{"insufficient":false,"projectName":"...","select":"Pessoal"|"Familia"|"Loja"|"Casa"|"Instituto"|null,"doingLabels":["Casa"],"tasks":[{"title":"...","column":"BACKLOG"|"TO DO"|"DOING"|"DONE"}]}',
+    "projectName: resultado curto (outcome), distinto de listas GTD e pilares.",
+    `Pilares reservados: ${PILLAR_PROJECTS.join(" / ")}. Listas: ${GTD_NEXT_ACTIONS}, ${GTD_INCUBATE}, ${GTD_ARCHIVE}.`,
+    "Se a captura for o mesmo resultado de um projeto já existente, reutilize o nome EXATO da lista.",
+    "insufficient:true se não der para nomear um resultado. Aí tasks=[].",
+    "tasks: ações GTD (verbo + objeto). No máximo 7. Exatamente uma column DOING (primeira ação física). DONE só se já estiver feito. Resto BACKLOG ou TO DO.",
+    `doingLabels: contexto só da DOING, entre ${CONTEXT_LABELS.join(", ")}. Dúvida: [].`,
+    `select: só as opções listadas, se óbvio; senão null.`,
+    "",
+    "Projetos PARA já existentes:",
+    existing,
+    "",
+    `Título: ${input.task.content}`,
+    `Descrição: ${input.task.description}`,
+    "Comentários:",
+    comments,
+  ].join("\n");
+}

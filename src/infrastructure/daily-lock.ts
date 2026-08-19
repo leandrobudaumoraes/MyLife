@@ -52,15 +52,15 @@ export function acquireDailyLock(input: {
   const force = input.force === true;
 
   if (existsSync(path)) {
-    const existing = readLock(path);
-    if (existing) {
-      if (existing.status === "running" && pidAlive(existing.pid)) {
-        return { acquired: false, reason: "in_progress" };
-      }
-      if (existing.status === "done" && !force) {
-        return { acquired: false, reason: "already_done" };
-      }
-    }
+    // const existing = readLock(path);
+    // if (existing) {
+    //   if (existing.status === "running" && pidAlive(existing.pid)) {
+    //     return { acquired: false, reason: "in_progress" };
+    //   }
+    //   if (existing.status === "done" && !force) {
+    //     return { acquired: false, reason: "already_done" };
+    //   }
+    // }
     try {
       unlinkSync(path);
     } catch {

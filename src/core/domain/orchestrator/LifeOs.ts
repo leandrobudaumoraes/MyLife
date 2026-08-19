@@ -5,7 +5,9 @@ import { inject, injectable } from "inversify";
 import { civilDateNow } from "../clock.js";
 import { err, ok, type Result } from "../result.js";
 import {
+  InboxRunSchema,
   SmokeCheckSchema,
+  type InboxRun,
   type IntegrationConfig,
   type SmokeCheck,
 } from "../schemas.js";
@@ -15,10 +17,11 @@ import type { NotionPort } from "../../ports/NotionPort.js";
 import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { TOKENS } from "../../ports/tokens.js";
 import { createLifeOsGraph } from "./LifeOsGraph.js";
+import { ensureGtd } from "../gtd/ensure.js";
+import { processInbox } from "../gtd/processInbox.js";
 
 /**
- * Fachada do Life OS. Hoje só verifica que as conexões respondem.
- * A orquestração nova entra aqui.
+ * Fachada do Life OS: ensure GTD e processa a Inbox.
  */
 @injectable()
 export class LifeOs {
@@ -29,6 +32,27 @@ export class LifeOs {
     @inject(TOKENS.Llm) private readonly llm: LlmPort,
     @inject(TOKENS.Config) private readonly config: IntegrationConfig,
   ) {}
+
+  async run(): Promise<Result<InboxRun>> {
+    const ensured = await ensureGtd(this.todoist);
+    if (!ensured.ok) {
+      return ensured;
+    }
+
+    const processed = await processInbox({
+      todoist: this.todoist,
+      notion: this.notion,
+      llm: this.llm,
+      tree: ensured.value.tree,
+      labelsCreated: ensured.value.labelsCreated,
+      projectsCreated: ensured.value.projectsCreated,
+    });
+    if (!processed.ok) {
+      return processed;
+    }
+
+    return ok(InboxRunSchema.parse(processed.value));
+  }
 
   async smokeCheck(): Promise<Result<SmokeCheck>> {
     const date = civilDateNow();

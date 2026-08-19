@@ -16,6 +16,7 @@ export type TimeRange = z.infer<typeof TimeRangeSchema>;
 export const TodoistTaskSchema = z.object({
   id: z.string(),
   content: z.string(),
+  description: z.string(),
   projectId: z.string(),
   sectionId: z.string().nullable(),
   labels: z.array(z.string()),
@@ -29,9 +30,111 @@ export type TodoistTask = z.infer<typeof TodoistTaskSchema>;
 export const TodoistProjectSchema = z.object({
   id: z.string(),
   name: z.string(),
+  parentId: z.string().nullable(),
   inboxProject: z.boolean(),
 });
 export type TodoistProject = z.infer<typeof TodoistProjectSchema>;
+
+export const TodoistLabelSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  color: z.string(),
+});
+export type TodoistLabel = z.infer<typeof TodoistLabelSchema>;
+
+export const ListTasksQuerySchema = z.object({
+  projectId: z.string(),
+});
+export type ListTasksQuery = z.infer<typeof ListTasksQuerySchema>;
+
+export const CreateTodoistProjectInputSchema = z.object({
+  name: z.string(),
+  parentId: z.string().nullable(),
+});
+export type CreateTodoistProjectInput = z.infer<
+  typeof CreateTodoistProjectInputSchema
+>;
+
+export const CreateTodoistLabelInputSchema = z.object({
+  name: z.string(),
+  color: z.string(),
+});
+export type CreateTodoistLabelInput = z.infer<
+  typeof CreateTodoistLabelInputSchema
+>;
+
+export const CreateTodoistTaskInputSchema = z.object({
+  content: z.string(),
+  projectId: z.string(),
+  labels: z.array(z.string()),
+});
+export type CreateTodoistTaskInput = z.infer<typeof CreateTodoistTaskInputSchema>;
+
+export const UpdateTodoistTaskPatchSchema = z.object({
+  content: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+});
+export type UpdateTodoistTaskPatch = z.infer<typeof UpdateTodoistTaskPatchSchema>;
+
+export const KanbanColumnSchema = z.enum([
+  "BACKLOG",
+  "TO DO",
+  "DOING",
+  "DONE",
+]);
+export type KanbanColumn = z.infer<typeof KanbanColumnSchema>;
+
+export const NotionProjectSelectSchema = z.enum([
+  "Pessoal",
+  "Familia",
+  "Loja",
+  "Casa",
+  "Instituto",
+]);
+export type NotionProjectSelect = z.infer<typeof NotionProjectSelectSchema>;
+
+export const UpsertProjectPageInputSchema = z.object({
+  title: z.string(),
+  select: NotionProjectSelectSchema.nullable(),
+});
+export type UpsertProjectPageInput = z.infer<typeof UpsertProjectPageInputSchema>;
+
+export const ProjectTaskBoardSchema = z.object({
+  dataSourceId: z.string(),
+  existingTitles: z.array(z.string()),
+});
+export type ProjectTaskBoard = z.infer<typeof ProjectTaskBoardSchema>;
+
+export const CreateProjectTaskInputSchema = z.object({
+  dataSourceId: z.string(),
+  title: z.string(),
+  column: KanbanColumnSchema,
+});
+export type CreateProjectTaskInput = z.infer<typeof CreateProjectTaskInputSchema>;
+
+export const InboxRoutingSchema = z.enum([
+  "Next",
+  "Maybe",
+  "Archive",
+  "Project",
+]);
+export type InboxRouting = z.infer<typeof InboxRoutingSchema>;
+
+export const InboxRunItemSchema = z.object({
+  taskId: z.string(),
+  routing: InboxRoutingSchema,
+  detail: z.string(),
+});
+export type InboxRunItem = z.infer<typeof InboxRunItemSchema>;
+
+export const InboxRunSchema = z.object({
+  labelsCreated: z.array(z.string()),
+  projectsCreated: z.array(z.string()),
+  processed: z.array(InboxRunItemSchema),
+  skipped: z.number().int().nonnegative(),
+  errors: z.array(z.string()),
+});
+export type InboxRun = z.infer<typeof InboxRunSchema>;
 
 export const NotionPageSchema = z.object({
   pageId: z.string(),

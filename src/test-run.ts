@@ -1,3 +1,3 @@
-import { runSmokeCheck } from "./bootstrap.js";
+import { runLifeOs } from "./bootstrap.js";
 
-await runSmokeCheck();
+await runLifeOs();
