@@ -89,8 +89,6 @@ function foldSelectToken(value: string): string {
     .replace(/\s+/g, " ");
 }
 
-const MAX_PLANNED_TASKS = 7;
-
 export function forceSingleDoing(
   tasks: readonly PlannedTask[],
 ): PlannedTask[] {
@@ -131,6 +129,14 @@ function demoteExtraDoing(
   });
 }
 
+export function doingOnly(
+  tasks: readonly PlannedTask[],
+): PlannedTask | null {
+  return doingTaskOf(forceSingleDoing(tasks));
+}
+
+const MAX_PLANNED_TASKS = 7;
+
 export function limitPlannedTasks(
   tasks: readonly PlannedTask[],
 ): PlannedTask[] {
@@ -141,20 +147,6 @@ export function limitPlannedTasks(
   const doing = forced.find((task) => task.column === "DOING");
   const rest = forced.filter((task) => task !== doing);
   return doing ? [doing, ...rest.slice(0, MAX_PLANNED_TASKS - 1)] : forced.slice(0, MAX_PLANNED_TASKS);
-}
-
-export function demoteDoingIfOccupied(
-  tasks: readonly PlannedTask[],
-  alreadyHasDoing: boolean,
-): PlannedTask[] {
-  if (!alreadyHasDoing) {
-    return [...tasks];
-  }
-  return tasks.map((task) =>
-    task.column === "DOING"
-      ? { title: task.title, column: "TO DO" }
-      : task,
-  );
 }
 
 export function isUsableProjectPlan(plan: ProjectPlan): boolean {

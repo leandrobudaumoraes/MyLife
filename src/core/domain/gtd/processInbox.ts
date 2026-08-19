@@ -15,7 +15,6 @@ import { extractJson } from "./json.js";
 import { mergeContextLabels, withDoingLabel } from "./labels.js";
 import { nextRewritePrompt, projectPlanPrompt } from "./prompts.js";
 import {
-  demoteDoingIfOccupied,
   doingTaskOf,
   isUsableProjectPlan,
   limitPlannedTasks,
@@ -214,10 +213,21 @@ async function processProject(
   }
 
   const alreadyHasDoing = await projectHasDoing(input.todoist, project.id);
-  const tasks = demoteDoingIfOccupied(
-    limitPlannedTasks(plan.tasks),
-    alreadyHasDoing,
-  );
+  if (alreadyHasDoing) {
+    return {
+      status: "skipped",
+      reason: `${task.id}: projeto já tem Doing — ficou na Inbox`,
+    };
+  }
+
+  const tasks = limitPlannedTasks(plan.tasks);
+  const doing = doingTaskOf(tasks);
+  if (!doing) {
+    return {
+      status: "skipped",
+      reason: `${task.id}: sem ação DOING — ficou na Inbox`,
+    };
+  }
 
   const notionPage = await input.notion.upsertProjectPage({
     title: project.name,
@@ -257,11 +267,11 @@ async function processProject(
     existingTitles.add(planned.title);
   }
 
-  await materializeTodoistTasks(
+  await materializeDoing(
     input.todoist,
     task,
     project.id,
-    tasks,
+    doing,
     plan.doingLabels,
   );
 
@@ -269,54 +279,27 @@ async function processProject(
     status: "ok",
     project,
     createdProject,
-    detail: `${project.name} · ${tasks.length} tarefas · DOING ${doingTaskOf(tasks)?.title ?? "nenhuma"}`,
+    detail: `${project.name} · ${tasks.length} cards Notion · DOING ${doing.title}`,
   };
 }
 
-async function materializeTodoistTasks(
+async function materializeDoing(
   todoist: TodoistPort,
   seed: TodoistTask,
   projectId: string,
-  tasks: readonly PlannedTask[],
+  doing: PlannedTask,
   doingLabels: readonly string[],
 ): Promise<void> {
-  const doing = doingTaskOf(tasks);
-  const base = stripRoutingLabels(seed.labels);
-  const seedTitle = doing?.title ?? tasks[0]?.title ?? seed.content;
-  const seedIsDoing = doing !== null && seedTitle === doing.title;
-
-  const seedLabels = seedIsDoing
-    ? withDoingLabel(mergeContextLabels(base, doingLabels))
-    : withoutState(base);
-
+  const labels = withDoingLabel(
+    mergeContextLabels(stripRoutingLabels(seed.labels), doingLabels),
+  );
   await requireOk(todoist.moveTask(seed.id, projectId));
   await requireOk(
     todoist.updateTask(seed.id, {
-      content: seedTitle,
-      labels: seedLabels,
+      content: doing.title,
+      labels,
     }),
   );
-
-  for (const planned of tasks) {
-    if (planned.title === seedTitle) {
-      continue;
-    }
-    const created = await todoist.createTask({
-      content: planned.title,
-      projectId,
-      labels:
-        planned.column === "DOING" && !seedIsDoing
-          ? withDoingLabel(mergeContextLabels(base, doingLabels))
-          : [],
-    });
-    if (!created.ok) {
-      throw new Error(created.error.message);
-    }
-  }
-}
-
-function withoutState(labels: readonly string[]): string[] {
-  return labels.filter((label) => label !== STATE_LABEL_DOING);
 }
 
 async function projectHasDoing(

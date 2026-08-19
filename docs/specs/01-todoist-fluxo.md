@@ -1,6 +1,6 @@
 # Spec 01 — Fluxo Todoist
 
-Status: **alinhada** (2026-08-18) — 3ª modificação: etiqueta `Project` cria projeto PARA + kanban Notion  
+Status: **alinhada** (2026-08-18) — 5ª modificação: Notion recebe o quadro; Todoist só a `DOING`  
 Código do processador: **nesta corrida** (ensure GTD + Inbox). A conta **não** precisa existir na mão.
 
 Captura humana = **Inbox nativa do Todoist** + **uma** etiqueta de roteamento.  
@@ -27,7 +27,7 @@ Contrato = **nomes canônicos** desta nota. IDs não entram no domínio: servem 
 
 O humano **adiciona na Inbox** e **marca o destino** com uma etiqueta de roteamento. Não escolhe pasta, data nem nome final do projeto.
 
-TDAH: um inbox. Um destino por item. `Next` / `Maybe` / `Archive` **não** explodem um texto em cinco tarefas. `Project` é a **única** exceção: o humano declarou que aquilo é um projeto; o script planeja o quadro.
+TDAH: um inbox. Um destino por item. `Next` / `Maybe` / `Archive` **não** explodem um texto em cinco tarefas. `Project` fatia o resultado no **kanban Notion**; no Todoist entra **só** a `DOING`.
 
 ---
 
@@ -156,11 +156,11 @@ flowchart TB
   FILTRO -->|Next| NEXT["Move para Próximas ações, tira Next, aplica contexto"]
   FILTRO -->|Maybe| MAYBE["Move para Encubar, tira Maybe"]
   FILTRO -->|Archive| ARQ["Move para Arquivar, tira Archive"]
-  FILTRO -->|Project| PROJ["Nomeia o PARA, cria filho de Projetos, planeja kanban, converte a captura em DOING"]
+  FILTRO -->|Project| PROJ["Nomeia o PARA, kanban no Notion, captura vira DOING no Todoist"]
 ```
 
 Um item `Next` / `Maybe` / `Archive` → **um** destino. Sem data. Sem Hoje.  
-Um item `Project` → **um** projeto PARA + um quadro de tarefas + **uma** DOING no Todoist. Sem data. Sem Hoje.
+Um item `Project` → **um** projeto PARA + quadro completo no Notion + **uma** DOING no Todoist. Sem data. Sem Hoje.
 
 ### 3.1 Filtrar
 
@@ -211,7 +211,7 @@ Etiquetas de contexto que o humano já tiver na tarefa **permanecem**, salvo a d
 
 - Processar item sem `Next` / `Maybe` / `Archive` / `Project`
 - Mover para projeto de **pilar**
-- Criar um segundo *item* a partir de um da Inbox — **exceto** o caminho `Project` (§3.5)
+- Criar um segundo *item* no **Todoist** a partir de um da Inbox
 - Criar etiqueta ou projeto fora das tabelas §2 / §2.2 / §2.3 / §2.4 e dos PARA gerados em §3.5
 - Completar tarefa
 - Criar evento no Calendar
@@ -219,6 +219,7 @@ Etiquetas de contexto que o humano já tiver na tarefa **permanecem**, salvo a d
 - Etiquetar por pilar
 - Aplicar regra dos 2 minutos
 - Partir um item `Next` / `Maybe` / `Archive` em N tarefas
+- Criar no Todoist tarefas que no Notion não estão em `DOING`
 - Aplicar contexto em `Maybe` ou `Archive`
 - Apagar, fundir ou reparentar projeto que já exista
 - Replanejar um projeto PARA já criado só porque a corrida rodou de novo
@@ -251,35 +252,41 @@ O LLM propõe **um** nome de resultado PARA:
 
 #### 3.5.3 Materializar no Todoist
 
+O Todoist só recebe a ação que está em `DOING` no Notion. BACKLOG / TO DO / DONE **não** viram tarefa Todoist nesta corrida.
+
 1. Criar o projeto como **filho de `📁 Projetos`**, com o nome da §3.5.2 (ou reusar o existente).
-2. Planejar as tarefas (§3.5.4).
-3. **Converter** o item da Inbox na tarefa **DOING**: move para o projeto PARA, reescreve o título em GTD (§3.3), remove `Project`, aplica `Doing` + contexto §2.3. Sem due.
-4. Criar as demais tarefas planejadas **dentro do mesmo projeto Todoist**. Sem `Doing`. Sem contexto. Sem due.
-5. Não copiar essas tarefas para `⏩ Próximas ações`. A ação corrente mora no projeto PARA, marcada com `Doing`.
+2. Planejar o quadro (§3.5.4) e materializar **todos** os cards no Notion (§3.6.2).
+3. **Converter** o item da Inbox na tarefa **DOING**: move para o projeto PARA, reescreve o título em GTD (§3.3) igual ao card `DOING` do Notion, remove `Project`, aplica `Doing` + contexto §2.3. Sem due.
+4. **Não** chamar `createTask` no Todoist para o resto do quadro.
+5. Não copiar a DOING para `⏩ Próximas ações`. A ação corrente mora no projeto PARA, marcada com `Doing`.
 
 O item original **não** permanece na Inbox depois de um `Project` bem-sucedido.
 
-#### 3.5.4 Planejar as tarefas
+Se o projeto PARA **já** tiver uma tarefa com `Doing`, esta captura **fica na Inbox**. Não abre segunda DOING no Todoist.
+
+#### 3.5.4 Planejar as tarefas (kanban Notion)
 
 O script cria o quadro na primeira materialização. Não pede ao humano para fatiar.
 
 Colunas (nomes exatos):
 
-| Coluna | O que entra |
-|---|---|
-| `BACKLOG` | Trabalho do resultado que ainda não está na fila próxima |
-| `TO DO` | Próximas ações já esclarecidas, ainda não em curso |
-| `DOING` | **Exatamente uma** ação física, agora |
-| `DONE` | Só se a captura já documentar algo concluído; senão, vazia |
+| Coluna | O que entra | Todoist nesta corrida |
+|---|---|---|
+| `BACKLOG` | Trabalho do resultado que ainda não está na fila próxima | não cria |
+| `TO DO` | Próximas ações já esclarecidas, ainda não em curso | não cria |
+| `DOING` | **Exatamente uma** ação física, agora | **única** tarefa: a captura convertida |
+| `DONE` | Só se a captura já documentar algo concluído; senão, vazia | não cria |
 
 Regras:
 
 - Toda tarefa do quadro é ação GTD (verbo no infinitivo + objeto concreto), no mesmo critério da §3.3.
 - **Exatamente uma** tarefa em `DOING`. Se o LLM marcar zero ou duas, o processador força a primeira ação física para `DOING` e o resto para `TO DO` / `BACKLOG`.
-- Teto TDAH: o necessário para o resultado, no máximo ~7 cards na criação. O resto fica de fora — não vira microgestão.
-- A captura original vira a `DOING` quando ela já é a primeira ação física. Se a captura for só o resultado (“montar o curso”), a `DOING` é a primeira ação extraída e a captura vira card de `BACKLOG` ou `TO DO` — sem duplicar o mesmo texto em dois cards.
+- Teto TDAH: o necessário para o resultado, no máximo ~7 cards **no Notion**. O resto fica de fora — não vira microgestão.
+- A captura original vira a `DOING` (reescrita). Não duplicar o mesmo texto em dois cards.
 
-Corrida seguinte: **não** reescreve o quadro de um PARA já criado. Só entra de novo se aparecer **outro** item na Inbox com `Project`.
+Corrida seguinte: **não** reescreve o quadro de um PARA já criado. Só entra de novo se aparecer **outro** item na Inbox com `Project` **e** aquele PARA ainda não tiver `Doing`.
+
+Promover um card de `TO DO` / `BACKLOG` para `DOING` **depois** desta corrida — e só então criar a tarefa no Todoist — fica para a próxima fatia. Nesta corrida o espelho Todoist nasce junto com o card `DOING` inicial.
 
 ### 3.6 `Project`: espelho no Notion
 
@@ -320,7 +327,7 @@ Na primeira materialização, se a página ainda não tiver o quadro:
 3. Vista **board** agrupada por `Status`, colunas nessa ordem.
 4. Criar um card por tarefa planejada na §3.5.4, na coluna correspondente. O card `DOING` é o mesmo título GTD da tarefa Todoist com etiqueta `Doing`.
 
-Se o banco filho / a vista já existirem na página (projeto reusado), **não** apaga cards. Só acrescenta o que esta captura nova exigir; a regra “exatamente uma DOING” vale **por projeto**: se já houver `Doing` no Todoist daquele PARA, a captura nova entra em `TO DO` ou `BACKLOG`, não abre segunda DOING.
+Se o banco filho / a vista já existirem na página (projeto reusado), **não** apaga cards. Só acrescenta o que esta captura nova exigir **no Notion**. A regra “exatamente uma DOING” vale **por projeto no Todoist**: se já houver `Doing` no Todoist daquele PARA, a captura **fica na Inbox** e o quadro Notion não ganha segunda DOING.
 
 Calendar continua fora. Vault não recebe página desta corrida.
 
@@ -342,9 +349,9 @@ Calendar continua fora. Vault não recebe página desta corrida.
 | `listTasks` (Inbox) | Captura filtrada |
 | ler descrição e comentários | `Project`: nomear e planejar |
 | mover / atualizar conteúdo e etiquetas | Organizar; converter a captura em DOING |
-| criar tarefa | `Project`: demais cards do quadro no Todoist |
+| criar tarefa | **Não chama** no caminho `Project` (BACKLOG/TO DO/DONE ficam só no Notion) |
 | Notion: criar/reusar linha em `Projects` | Espelho §3.6.1 |
-| Notion: banco filho `Tarefas` + board + cards | Espelho §3.6.2 |
+| Notion: banco filho `Tarefas` + board + cards do quadro | Espelho §3.6.2 |
 | `updateTaskDue` | **Não chama** |
 | `completeTask` | **Não chama** |
 
@@ -367,9 +374,9 @@ O Second Brain ainda tem seis pilares, outros nomes, sem Amizades / Financeiro. 
 5. `Next` → `⏩ Próximas ações`; tira `Next`; reescreve título; aplica contexto do catálogo.
 6. `Maybe` → `💤 Encubar`; tira `Maybe`; não adiciona etiqueta.
 7. `Archive` → `📌 Arquivar`; tira `Archive`; não adiciona etiqueta.
-8. `Project` → lê título, descrição, comentários e conteúdo; nomeia o resultado; cria (ou reusa) um filho de `📁 Projetos`; converte a captura na única `DOING`; cria o restante do quadro; tira `Project`; põe `Doing` + contexto só na DOING.
-9. O mesmo `Project` abre (ou reusa) uma linha no banco Notion `Projects` e um kanban `BACKLOG` / `TO DO` / `DOING` / `DONE` na página. Cards iniciais saem do script.
-10. Toda corrida relê a Inbox atrás de `Project` novo. Não replaneja PARA já criado. Não abre segunda `DOING` no mesmo projeto.
+8. `Project` → lê título, descrição, comentários e conteúdo; nomeia o resultado; cria (ou reusa) um filho de `📁 Projetos`; monta o kanban no Notion; converte a captura na única `DOING` do Todoist; tira `Project`; põe `Doing` + contexto só nela. **Não** cria no Todoist o que no Notion está em BACKLOG / TO DO / DONE.
+9. O mesmo `Project` abre (ou reusa) uma linha no banco Notion `Projects` e um kanban `BACKLOG` / `TO DO` / `DOING` / `DONE` na página. Cards iniciais saem do script. Só o card `DOING` tem espelho no Todoist.
+10. Toda corrida relê a Inbox atrás de `Project` novo. Não replaneja PARA já criado. Não abre segunda `DOING` no Todoist: se já houver `Doing`, a captura fica na Inbox.
 11. Esta corrida **não** marca Hoje e **não** move para pilar.
 12. Sem lista Aguardando. Sem Engenharia. Ensure não apaga o que já existe.
 

@@ -45,7 +45,7 @@ export function projectPlanPrompt(input: {
     `Pilares reservados: ${PILLAR_PROJECTS.join(" / ")}. Listas: ${GTD_NEXT_ACTIONS}, ${GTD_INCUBATE}, ${GTD_ARCHIVE}.`,
     "Se a captura for o mesmo resultado de um projeto já existente, reutilize o nome EXATO da lista.",
     "insufficient:true se não der para nomear um resultado. Aí tasks=[].",
-    "tasks: ações GTD (verbo + objeto). No máximo 7. Exatamente uma column DOING (primeira ação física). DONE só se já estiver feito. Resto BACKLOG ou TO DO.",
+    "tasks: ações GTD (verbo + objeto) para o kanban do Notion. No máximo 7. Exatamente uma column DOING (primeira ação física). DONE só se já estiver feito. Resto BACKLOG ou TO DO. O Todoist só recebe a DOING.",
     `doingLabels: contexto só da DOING, entre ${CONTEXT_LABELS.join(", ")}. Dúvida: [].`,
     "select: SEMPRE um dos cinco. Mapa: Família→Familia; Casa ou financeiro do lar→Casa; Instituto→Instituto; Loja Lua Branca→Loja; Saúde, amizades, Engenharia/IA/carreira/PagBank ou dúvida→Pessoal. Nunca null. Não invente opção.",
     "",

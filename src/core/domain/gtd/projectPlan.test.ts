@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  doingOnly,
   forceSingleDoing,
   isUsableProjectPlan,
   limitPlannedTasks,
@@ -26,7 +27,16 @@ test("segunda DOING vira TO DO", () => {
   assert.deepEqual(forced.map((task) => task.column), ["DOING", "TO DO"]);
 });
 
-test("teto de 7 preserva a DOING", () => {
+test("desta corrida o Todoist só pega a DOING", () => {
+  const doing = doingOnly([
+    { title: "A", column: "BACKLOG" },
+    { title: "B", column: "DOING" },
+    { title: "C", column: "TO DO" },
+  ]);
+  assert.deepEqual(doing, { title: "B", column: "DOING" });
+});
+
+test("teto de 7 preserva a DOING no quadro Notion", () => {
   const tasks = Array.from({ length: 10 }, (_, index) => ({
     title: `T${index}`,
     column: index === 3 ? ("DOING" as const) : ("BACKLOG" as const),

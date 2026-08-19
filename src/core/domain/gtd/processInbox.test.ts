@@ -70,9 +70,11 @@ test("item Project vira projeto PARA, DOING no Todoist e kanban no Notion", asyn
   assert.ok(doing?.labels.includes("Doing"));
   assert.ok(doing?.labels.includes("Casa"));
   assert.equal(doing?.content, "Listar o que está atrasado no instituto");
-  assert.equal(todoist.tasks.filter((item) => item.projectId === para?.id).length, 2);
+  assert.equal(todoist.tasks.filter((item) => item.projectId === para?.id).length, 1);
   assert.equal(notion.pages.length, 1);
   assert.equal(notion.cards.length, 2);
+  assert.equal(notion.cards[0]?.column, "DOING");
+  assert.equal(notion.cards[1]?.column, "TO DO");
   assert.equal(notion.lastSelect, "Instituto");
 });
 
@@ -101,6 +103,87 @@ test("Project com select nulo no LLM grava Pessoal no Notion", async () => {
   });
   assert.equal(result.ok, true);
   assert.equal(notion.lastSelect, "Pessoal");
+});
+
+test("Project cria o quadro no Notion e só a DOING no Todoist", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t3",
+      content: "montar o curso",
+      labels: ["Project"],
+    }),
+  ]);
+  const notion = new MemoryNotion();
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: false,
+        projectName: "Montar o curso",
+        select: "Pessoal",
+        doingLabels: [],
+        tasks: [
+          { title: "Listar os módulos do curso", column: "DOING" },
+          { title: "Escrever a primeira aula", column: "TO DO" },
+          { title: "Pesquisar materiais", column: "BACKLOG" },
+        ],
+      }),
+    ]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(todoist.tasks.length, 1);
+  assert.equal(todoist.tasks[0]?.content, "Listar os módulos do curso");
+  assert.equal(notion.cards.length, 3);
+  assert.deepEqual(
+    notion.cards.map((card) => card.column),
+    ["DOING", "TO DO", "BACKLOG"],
+  );
+});
+
+test("Project com Doing já existente deixa a captura na Inbox", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t4",
+      content: "outra captura do mesmo curso",
+      labels: ["Project"],
+    }),
+  ]);
+  todoist.projects.push({
+    id: "para-ia",
+    name: "Criar estrutura do curso de IA",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  todoist.tasks.push({
+    ...task({
+      id: "doing-1",
+      content: "Definir tópicos do curso",
+      labels: ["Doing"],
+    }),
+    projectId: "para-ia",
+  });
+  const result = await processInbox({
+    todoist,
+    notion: new MemoryNotion(),
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: false,
+        projectName: "Criar estrutura do curso de IA",
+        select: "Pessoal",
+        doingLabels: [],
+        tasks: [{ title: "Escrever a ementa", column: "DOING" }],
+      }),
+    ]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.skipped, 1);
+  assert.equal(todoist.tasks.find((item) => item.id === "t4")?.projectId, "inbox");
 });
 
 test("Next move para Próximas ações e tira a etiqueta de roteamento", async () => {
