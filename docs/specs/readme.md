@@ -4,6 +4,6 @@ Contrato em construção. Código do domínio só entra quando a spec correspond
 
 | Spec | Status | Sobre |
 |---|---|---|
-| [01 — Fluxo Todoist](01-todoist-fluxo.md) | alinhada | Ensure GTD; Inbox + `Next`/`Maybe`/`Archive`/`Project` (PARA + kanban Notion) |
+| [01 — Fluxo Todoist](01-todoist-fluxo.md) | alinhada | Ensure GTD; Inbox + `Project`; Todoist vazio fecha `DOING` no Notion e sobe a próxima |
 
 Próximas (ainda sem arquivo): Calendar (relógio), Notion (plano), orquestração / grafo.

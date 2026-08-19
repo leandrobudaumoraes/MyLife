@@ -7,6 +7,7 @@ import {
   isUsableProjectPlan,
   limitPlannedTasks,
   normalizeProjectSelect,
+  pickNextDoing,
   ProjectPlanSchema,
 } from "./projectPlan.js";
 
@@ -80,4 +81,38 @@ test("select aceita alias de pilar e acento", () => {
   assert.equal(normalizeProjectSelect("💰 Financeiro"), "Casa");
   assert.equal(normalizeProjectSelect("Instituto Metatron"), "Instituto");
   assert.equal(normalizeProjectSelect("Engenharia e IA"), "Pessoal");
+});
+
+test("sem DOING promove a primeira TO DO", () => {
+  const next = pickNextDoing([
+    { title: "A", column: "BACKLOG" as const },
+    { title: "B", column: "TO DO" as const },
+    { title: "C", column: "DONE" as const },
+  ]);
+  assert.deepEqual(next, { title: "B", column: "TO DO" });
+});
+
+test("sem TO DO promove BACKLOG", () => {
+  const next = pickNextDoing([
+    { title: "A", column: "DONE" as const },
+    { title: "B", column: "BACKLOG" as const },
+  ]);
+  assert.deepEqual(next, { title: "B", column: "BACKLOG" });
+});
+
+test("com DOING ainda promove a TO DO (conclusão no Todoist fecha a DOING depois)", () => {
+  assert.deepEqual(
+    pickNextDoing([
+      { title: "A", column: "DOING" as const },
+      { title: "B", column: "TO DO" as const },
+    ]),
+    { title: "B", column: "TO DO" },
+  );
+});
+
+test("só DONE não promove", () => {
+  assert.equal(
+    pickNextDoing([{ title: "A", column: "DONE" as const }]),
+    null,
+  );
 });

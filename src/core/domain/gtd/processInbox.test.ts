@@ -10,12 +10,15 @@ import type {
   CreateTodoistLabelInput,
   CreateTodoistProjectInput,
   CreateTodoistTaskInput,
+  KanbanColumn,
   ListTasksQuery,
   NotionPage,
   ProjectTaskBoard,
+  ProjectTaskCard,
   TodoistLabel,
   TodoistProject,
   TodoistTask,
+  UpdateProjectTaskColumnInput,
   UpdateTodoistTaskPatch,
   UpsertChildPageInput,
   UpsertProjectPageInput,
@@ -215,6 +218,350 @@ test("Next move para Próximas ações e tira a etiqueta de roteamento", async (
   assert.ok(moved?.labels.includes("Celular"));
 });
 
+test("projeto Notion sem DOING promove TO DO e espelha no Todoist", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard("np-curso", "Montar o curso", [
+    { title: "Escrever a primeira aula", column: "TO DO" },
+    { title: "Pesquisar materiais", column: "BACKLOG" },
+  ]);
+
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([JSON.stringify({ labels: ["Casa"] })]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 1);
+  assert.equal(result.value.advanced[0]?.projectName, "Montar o curso");
+  assert.equal(result.value.advanced[0]?.taskTitle, "Escrever a primeira aula");
+  assert.equal(
+    notion.cards.find((card) => card.title === "Escrever a primeira aula")
+      ?.column,
+    "DOING",
+  );
+  const mirrored = todoist.tasks.find(
+    (item) => item.content === "Escrever a primeira aula",
+  );
+  assert.ok(mirrored);
+  assert.equal(mirrored?.projectId, "para-curso");
+  assert.ok(mirrored?.labels.includes("Doing"));
+  assert.ok(mirrored?.labels.includes("Casa"));
+  assert.equal(
+    todoist.tasks.filter((item) => item.projectId === "para-curso").length,
+    1,
+  );
+});
+
+test("Todoist vazio fecha a DOING no Notion e promove a TO DO", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard("np-curso", "Montar o curso", [
+    { title: "Listar os módulos", column: "DOING" },
+    { title: "Escrever a primeira aula", column: "TO DO" },
+  ]);
+
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([JSON.stringify({ labels: ["Casa"] })]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 1);
+  assert.equal(result.value.advanced[0]?.taskTitle, "Escrever a primeira aula");
+  assert.equal(
+    notion.cards.find((card) => card.title === "Listar os módulos")?.column,
+    "DONE",
+  );
+  assert.equal(
+    notion.cards.find((card) => card.title === "Escrever a primeira aula")
+      ?.column,
+    "DOING",
+  );
+  const mirrored = todoist.tasks.find(
+    (item) => item.content === "Escrever a primeira aula",
+  );
+  assert.ok(mirrored);
+  assert.equal(mirrored?.projectId, "para-curso");
+  assert.ok(mirrored?.labels.includes("Doing"));
+  assert.equal(todoist.tasks.length, 1);
+});
+
+test("não promove se o PARA no Todoist ainda tem tarefa aberta", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  todoist.tasks.push({
+    ...task({
+      id: "doing-1",
+      content: "Listar os módulos",
+      labels: ["Doing"],
+    }),
+    projectId: "para-curso",
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard("np-curso", "Montar o curso", [
+    { title: "Escrever a primeira aula", column: "TO DO" },
+  ]);
+
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 0);
+  assert.equal(
+    notion.cards.find((card) => card.title === "Escrever a primeira aula")
+      ?.column,
+    "TO DO",
+  );
+  assert.equal(todoist.tasks.length, 1);
+});
+
+test("sem TO DO promove BACKLOG para DOING", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard("np-curso", "Montar o curso", [
+    { title: "Pesquisar materiais", column: "BACKLOG" },
+  ]);
+
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced[0]?.taskTitle, "Pesquisar materiais");
+  assert.equal(notion.cards[0]?.column, "DOING");
+  assert.equal(todoist.tasks[0]?.content, "Pesquisar materiais");
+  assert.ok(todoist.tasks[0]?.labels.includes("Doing"));
+});
+
+test("Project recém-criado não ganha segunda DOING na mesma corrida", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t3",
+      content: "montar o curso",
+      labels: ["Project"],
+    }),
+  ]);
+  const notion = new MemoryNotion();
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: false,
+        projectName: "Montar o curso",
+        select: "Pessoal",
+        doingLabels: [],
+        tasks: [
+          { title: "Listar os módulos do curso", column: "DOING" },
+          { title: "Escrever a primeira aula", column: "TO DO" },
+        ],
+      }),
+    ]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 0);
+  assert.equal(todoist.tasks.length, 1);
+  assert.equal(todoist.tasks[0]?.content, "Listar os módulos do curso");
+});
+
+test("página Notion sem kanban Tarefas não cria DOING", async () => {
+  const todoist = new MemoryTodoist([]);
+  const notion = new MemoryNotion();
+  notion.pages.push({
+    pageId: "np-solta",
+    title: "Ideia sem quadro",
+    url: "https://notion.so/np-solta",
+  });
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 0);
+  assert.equal(todoist.tasks.length, 0);
+});
+
+test("sem PARA no Todoist promove TO DO e cria o projeto", async () => {
+  const todoist = new MemoryTodoist([]);
+  const notion = new MemoryNotion();
+  notion.seedBoard("np-curso", "Montar o curso", [
+    { title: "Escrever a primeira aula", column: "TO DO" },
+  ]);
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  const para = todoist.projects.find(
+    (project) => project.name === "Montar o curso",
+  );
+  assert.ok(para);
+  assert.equal(para?.parentId, "folder");
+  assert.ok(result.value.projectsCreated.includes("Montar o curso"));
+  assert.equal(todoist.tasks[0]?.projectId, para?.id);
+  assert.ok(todoist.tasks[0]?.labels.includes("Doing"));
+});
+
+test("sem PARA no Todoist espelha a DOING existente sem marcar DONE", async () => {
+  const todoist = new MemoryTodoist([]);
+  const notion = new MemoryNotion();
+  notion.seedBoard("np-curso", "Montar o curso", [
+    { title: "Listar os módulos", column: "DOING" },
+    { title: "Escrever a primeira aula", column: "TO DO" },
+  ]);
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(
+    notion.cards.find((card) => card.title === "Listar os módulos")?.column,
+    "DOING",
+  );
+  assert.equal(
+    notion.cards.find((card) => card.title === "Escrever a primeira aula")
+      ?.column,
+    "TO DO",
+  );
+  assert.equal(todoist.tasks[0]?.content, "Listar os módulos");
+  assert.ok(todoist.tasks[0]?.labels.includes("Doing"));
+});
+
+test("tarefa concluída no Todoist (isCompleted) fecha a DOING e sobe a próxima", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  todoist.tasks.push({
+    ...task({
+      id: "done-1",
+      content: "Listar os módulos",
+      labels: ["Doing"],
+    }),
+    projectId: "para-curso",
+    isCompleted: true,
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard("np-curso", "Montar o curso", [
+    { title: "Listar os módulos", column: "DOING" },
+    { title: "Escrever a primeira aula", column: "TO DO" },
+  ]);
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(
+    notion.cards.find((card) => card.title === "Listar os módulos")?.column,
+    "DONE",
+  );
+  assert.equal(
+    notion.cards.find((card) => card.title === "Escrever a primeira aula")
+      ?.column,
+    "DOING",
+  );
+  const open = todoist.tasks.filter((item) => !item.isCompleted);
+  assert.equal(open.length, 1);
+  assert.equal(open[0]?.content, "Escrever a primeira aula");
+});
+
+test("PARA vazio só com DOING no Notion marca DONE e não inventa carta", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard("np-curso", "Montar o curso", [
+    { title: "Listar os módulos", column: "DOING" },
+  ]);
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 0);
+  assert.equal(notion.cards[0]?.column, "DONE");
+  assert.equal(todoist.tasks.length, 0);
+});
+
 function task(input: {
   readonly id: string;
   readonly content: string;
@@ -245,8 +592,36 @@ class ScriptedLlm implements LlmPort {
 
 class MemoryNotion implements NotionPort {
   pages: NotionPage[] = [];
-  cards: Array<{ title: string; column: string }> = [];
   lastSelect: UpsertProjectPageInput["select"] = null;
+  private boards = new Map<
+    string,
+    { dataSourceId: string; cards: ProjectTaskCard[] }
+  >();
+  private seq = 1;
+
+  get cards(): ProjectTaskCard[] {
+    return [...this.boards.values()].flatMap((board) => board.cards);
+  }
+
+  seedBoard(
+    pageId: string,
+    title: string,
+    cards: Array<{ title: string; column: KanbanColumn }>,
+  ): void {
+    this.pages.push({
+      pageId,
+      title,
+      url: `https://notion.so/${pageId}`,
+    });
+    this.boards.set(pageId, {
+      dataSourceId: `ds-${pageId}`,
+      cards: cards.map((card, index) => ({
+        pageId: `${pageId}-c${index}`,
+        title: card.title,
+        column: card.column,
+      })),
+    });
+  }
 
   async listDatabasePages(): Promise<Result<readonly NotionPage[]>> {
     return ok(this.pages);
@@ -267,30 +642,97 @@ class MemoryNotion implements NotionPort {
     input: UpsertProjectPageInput,
   ): Promise<Result<NotionPage>> {
     this.lastSelect = input.select;
+    const existing = this.pages.find((page) => page.title === input.title);
+    if (existing) {
+      return ok(existing);
+    }
     const page: NotionPage = {
-      pageId: "np1",
+      pageId: `np${this.seq}`,
       title: input.title,
-      url: "https://notion.so/np1",
+      url: `https://notion.so/np${this.seq}`,
     };
-    this.pages = [page];
+    this.seq += 1;
+    this.pages.push(page);
     return ok(page);
   }
 
   async ensureProjectTaskBoard(
-    _pageId: string,
+    pageId: string,
   ): Promise<Result<ProjectTaskBoard>> {
-    return ok({ dataSourceId: "ds1", existingTitles: [] });
+    const board = this.boardOf(pageId);
+    return ok({ dataSourceId: board.dataSourceId, tasks: [...board.cards] });
+  }
+
+  async findProjectTaskBoard(
+    pageId: string,
+  ): Promise<Result<ProjectTaskBoard | null>> {
+    const board = this.boards.get(pageId);
+    if (!board) {
+      return ok(null);
+    }
+    return ok({ dataSourceId: board.dataSourceId, tasks: [...board.cards] });
   }
 
   async createProjectTask(
     input: CreateProjectTaskInput,
   ): Promise<Result<NotionPage>> {
-    this.cards.push({ title: input.title, column: input.column });
-    return ok({
-      pageId: `c${this.cards.length}`,
+    const board = [...this.boards.values()].find(
+      (item) => item.dataSourceId === input.dataSourceId,
+    );
+    if (!board) {
+      return ok({
+        pageId: "missing",
+        title: input.title,
+        url: "https://notion.so/missing",
+      });
+    }
+    const card: ProjectTaskCard = {
+      pageId: `c${this.seq}`,
       title: input.title,
-      url: "https://notion.so/c",
+      column: input.column,
+    };
+    this.seq += 1;
+    board.cards.push(card);
+    return ok({
+      pageId: card.pageId,
+      title: card.title,
+      url: `https://notion.so/${card.pageId}`,
     });
+  }
+
+  async updateProjectTaskColumn(
+    input: UpdateProjectTaskColumnInput,
+  ): Promise<Result<NotionPage>> {
+    for (const board of this.boards.values()) {
+      const card = board.cards.find((item) => item.pageId === input.pageId);
+      if (!card) {
+        continue;
+      }
+      card.column = input.column;
+      return ok({
+        pageId: card.pageId,
+        title: card.title,
+        url: `https://notion.so/${card.pageId}`,
+      });
+    }
+    return ok({
+      pageId: input.pageId,
+      title: "",
+      url: `https://notion.so/${input.pageId}`,
+    });
+  }
+
+  private boardOf(pageId: string): {
+    dataSourceId: string;
+    cards: ProjectTaskCard[];
+  } {
+    const existing = this.boards.get(pageId);
+    if (existing) {
+      return existing;
+    }
+    const created = { dataSourceId: `ds-${pageId}`, cards: [] };
+    this.boards.set(pageId, created);
+    return created;
   }
 }
 
@@ -320,10 +762,11 @@ class MemoryTodoist implements TodoistPort {
   async listTasks(
     query?: ListTasksQuery,
   ): Promise<Result<readonly TodoistTask[]>> {
+    const open = this.tasks.filter((item) => !item.isCompleted);
     if (!query) {
-      return ok(this.tasks);
+      return ok(open);
     }
-    return ok(this.tasks.filter((item) => item.projectId === query.projectId));
+    return ok(open.filter((item) => item.projectId === query.projectId));
   }
 
   async getTask(id: string): Promise<Result<TodoistTask>> {
@@ -380,7 +823,10 @@ class MemoryTodoist implements TodoistPort {
     return ok(stored);
   }
 
-  async completeTask(_id: string): Promise<Result<void>> {
+  async completeTask(id: string): Promise<Result<void>> {
+    this.tasks = this.tasks.map((item) =>
+      item.id === id ? { ...item, isCompleted: true } : item,
+    );
     return ok(undefined);
   }
 

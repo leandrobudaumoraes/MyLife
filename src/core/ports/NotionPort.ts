@@ -3,6 +3,7 @@ import type {
   CreateProjectTaskInput,
   NotionPage,
   ProjectTaskBoard,
+  UpdateProjectTaskColumnInput,
   UpsertChildPageInput,
   UpsertProjectPageInput,
 } from "../domain/schemas.js";
@@ -18,7 +19,13 @@ export interface NotionPort {
     input: UpsertProjectPageInput,
   ): Promise<Result<NotionPage>>;
   ensureProjectTaskBoard(pageId: string): Promise<Result<ProjectTaskBoard>>;
+  findProjectTaskBoard(
+    pageId: string,
+  ): Promise<Result<ProjectTaskBoard | null>>;
   createProjectTask(input: CreateProjectTaskInput): Promise<Result<NotionPage>>;
+  updateProjectTaskColumn(
+    input: UpdateProjectTaskColumnInput,
+  ): Promise<Result<NotionPage>>;
 }
 
 export type INotionPort = NotionPort;

@@ -17,12 +17,16 @@ import { inject, injectable } from "inversify";
 
 import { err, ok, type Result } from "../../core/domain/result.js";
 import {
+  KanbanColumnSchema,
   NotionPageSchema,
   type CreateProjectTaskInput,
   type IntegrationConfig,
   type IntegrationError,
+  type KanbanColumn,
   type NotionPage,
   type ProjectTaskBoard,
+  type ProjectTaskCard,
+  type UpdateProjectTaskColumnInput,
   type UpsertChildPageInput,
   type UpsertProjectPageInput,
 } from "../../core/domain/schemas.js";
@@ -168,13 +172,13 @@ export class NotionAdapter implements NotionPort {
         (await this.createTasksDatabase(pageId));
       const dataSourceId = await this.dataSourceIdOf(databaseId);
       await this.ensureBoardView(dataSourceId, databaseId);
-      const existingTitles = await this.listDataSourceTitles(dataSourceId);
+      const tasks = await this.listDataSourceTasks(dataSourceId);
       console.log("[NotionAdapter.ensureProjectTaskBoard]", {
         ok: true,
         durationMs: Date.now() - started,
         pageId,
       });
-      return ok({ dataSourceId, existingTitles });
+      return ok({ dataSourceId, tasks });
     } catch (cause: unknown) {
       return this.fail("ensureProjectTaskBoard", started, cause);
     }
@@ -216,6 +220,73 @@ export class NotionAdapter implements NotionPort {
       return ok(page);
     } catch (cause: unknown) {
       return this.fail("createProjectTask", started, cause);
+    }
+  }
+
+  async findProjectTaskBoard(
+    pageId: string,
+  ): Promise<Result<ProjectTaskBoard | null>> {
+    const started = Date.now();
+    try {
+      const databaseId = await this.findChildDatabaseId(pageId, "Tarefas");
+      if (!databaseId) {
+        console.log("[NotionAdapter.findProjectTaskBoard]", {
+          ok: true,
+          durationMs: Date.now() - started,
+          pageId,
+          found: false,
+        });
+        return ok(null);
+      }
+      const dataSourceId = await this.dataSourceIdOf(databaseId);
+      const tasks = await this.listDataSourceTasks(dataSourceId);
+      console.log("[NotionAdapter.findProjectTaskBoard]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        pageId,
+        found: true,
+      });
+      return ok({ dataSourceId, tasks });
+    } catch (cause: unknown) {
+      return this.fail("findProjectTaskBoard", started, cause);
+    }
+  }
+
+  async updateProjectTaskColumn(
+    input: UpdateProjectTaskColumnInput,
+  ): Promise<Result<NotionPage>> {
+    const started = Date.now();
+    try {
+      const page = await this.client.pages.retrieve({ page_id: input.pageId });
+      if (!isFullPage(page)) {
+        throw new Error("Card de tarefa Notion incompleto");
+      }
+      const status = findStatusProperty(page.properties);
+      if (!status) {
+        throw new Error("Card de tarefa sem propriedade Status");
+      }
+      const updated = await this.client.pages.update({
+        page_id: input.pageId,
+        properties: {
+          [status.name]:
+            status.type === "status"
+              ? { status: { name: input.column } }
+              : { select: { name: input.column } },
+        },
+      });
+      if (!isFullPage(updated)) {
+        throw new Error("Card de tarefa Notion incompleto");
+      }
+      const mapped = toPage(updated);
+      console.log("[NotionAdapter.updateProjectTaskColumn]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        pageId: mapped.pageId,
+        column: input.column,
+      });
+      return ok(mapped);
+    } catch (cause: unknown) {
+      return this.fail("updateProjectTaskColumn", started, cause);
     }
   }
 
@@ -357,10 +428,10 @@ export class NotionAdapter implements NotionPort {
     }
   }
 
-  private async listDataSourceTitles(
+  private async listDataSourceTasks(
     dataSourceId: string,
-  ): Promise<string[]> {
-    const titles: string[] = [];
+  ): Promise<ProjectTaskCard[]> {
+    const tasks: ProjectTaskCard[] = [];
     let cursor: string | null = null;
     do {
       const response = await this.client.dataSources.query({
@@ -369,13 +440,22 @@ export class NotionAdapter implements NotionPort {
         ...(cursor ? { start_cursor: cursor } : {}),
       });
       for (const result of response.results) {
-        if (isFullPage(result)) {
-          titles.push(readAnyTitle(result));
+        if (!isFullPage(result)) {
+          continue;
         }
+        const column = readKanbanColumn(result);
+        if (!column) {
+          continue;
+        }
+        tasks.push({
+          pageId: result.id,
+          title: readAnyTitle(result),
+          column,
+        });
       }
       cursor = response.has_more ? response.next_cursor : null;
     } while (cursor);
-    return titles;
+    return tasks;
   }
 
   private async resolveProjectsDataSourceId(): Promise<string> {
@@ -527,6 +607,56 @@ function statusPropertyName(
     }
   }
   return "Status";
+}
+
+function readKanbanColumn(page: PageObjectResponse): KanbanColumn | null {
+  const status = findStatusProperty(page.properties);
+  if (!status?.value) {
+    return null;
+  }
+  const parsed = KanbanColumnSchema.safeParse(status.value);
+  return parsed.success ? parsed.data : null;
+}
+
+function findStatusProperty(
+  properties: PageObjectResponse["properties"],
+): { name: string; type: "select" | "status"; value: string | null } | null {
+  for (const [name, property] of Object.entries(properties)) {
+    if (name !== "Status") {
+      continue;
+    }
+    if (property.type === "select") {
+      return {
+        name,
+        type: "select",
+        value: property.select?.name ?? null,
+      };
+    }
+    if (property.type === "status") {
+      return {
+        name,
+        type: "status",
+        value: property.status?.name ?? null,
+      };
+    }
+  }
+  for (const [name, property] of Object.entries(properties)) {
+    if (property.type === "select") {
+      return {
+        name,
+        type: "select",
+        value: property.select?.name ?? null,
+      };
+    }
+    if (property.type === "status") {
+      return {
+        name,
+        type: "status",
+        value: property.status?.name ?? null,
+      };
+    }
+  }
+  return null;
 }
 
 function notionPageUrl(pageId: string): string {

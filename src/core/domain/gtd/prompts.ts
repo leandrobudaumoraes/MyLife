@@ -8,6 +8,17 @@ import {
 } from "./catalog.js";
 
 
+export function doingContextPrompt(title: string): string {
+  return [
+    "Esta ação GTD vai para DOING. O título já está pronto — não reescreva.",
+    "Responda só JSON: {\"labels\":[...]}",
+    `labels: só entre ${CONTEXT_LABELS.join(", ")}. No máximo uma localização, uma energia, Compra só se for compra. Dúvida: [].`,
+    "Não use nome de pilar. Não invente etiqueta.",
+    "",
+    `Título: ${title}`,
+  ].join("\n");
+}
+
 export function nextRewritePrompt(task: TodoistTask): string {
   return [
     "Reescreva esta captura da Inbox do Todoist como UMA próxima ação GTD.",

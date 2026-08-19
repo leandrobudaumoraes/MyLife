@@ -164,3 +164,24 @@ export function doingTaskOf(
 ): PlannedTask | null {
   return tasks.find((task) => task.column === "DOING") ?? null;
 }
+
+export const DoingContextSchema = z.object({
+  labels: z.array(z.string()).default([]),
+});
+export type DoingContext = z.infer<typeof DoingContextSchema>;
+
+export function pickNextDoing<T extends { readonly column: KanbanColumn }>(
+  tasks: readonly T[],
+): T | null {
+  return (
+    tasks.find((task) => task.column === "TO DO") ??
+    tasks.find((task) => task.column === "BACKLOG") ??
+    null
+  );
+}
+
+export function doingCardsOf<T extends { readonly column: KanbanColumn }>(
+  tasks: readonly T[],
+): T[] {
+  return tasks.filter((task) => task.column === "DOING");
+}

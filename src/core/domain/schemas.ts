@@ -99,9 +99,16 @@ export const UpsertProjectPageInputSchema = z.object({
 });
 export type UpsertProjectPageInput = z.infer<typeof UpsertProjectPageInputSchema>;
 
+export const ProjectTaskCardSchema = z.object({
+  pageId: z.string(),
+  title: z.string(),
+  column: KanbanColumnSchema,
+});
+export type ProjectTaskCard = z.infer<typeof ProjectTaskCardSchema>;
+
 export const ProjectTaskBoardSchema = z.object({
   dataSourceId: z.string(),
-  existingTitles: z.array(z.string()),
+  tasks: z.array(ProjectTaskCardSchema),
 });
 export type ProjectTaskBoard = z.infer<typeof ProjectTaskBoardSchema>;
 
@@ -111,6 +118,14 @@ export const CreateProjectTaskInputSchema = z.object({
   column: KanbanColumnSchema,
 });
 export type CreateProjectTaskInput = z.infer<typeof CreateProjectTaskInputSchema>;
+
+export const UpdateProjectTaskColumnInputSchema = z.object({
+  pageId: z.string(),
+  column: KanbanColumnSchema,
+});
+export type UpdateProjectTaskColumnInput = z.infer<
+  typeof UpdateProjectTaskColumnInputSchema
+>;
 
 export const InboxRoutingSchema = z.enum([
   "Next",
@@ -127,10 +142,17 @@ export const InboxRunItemSchema = z.object({
 });
 export type InboxRunItem = z.infer<typeof InboxRunItemSchema>;
 
+export const AdvancedDoingItemSchema = z.object({
+  projectName: z.string(),
+  taskTitle: z.string(),
+});
+export type AdvancedDoingItem = z.infer<typeof AdvancedDoingItemSchema>;
+
 export const InboxRunSchema = z.object({
   labelsCreated: z.array(z.string()),
   projectsCreated: z.array(z.string()),
   processed: z.array(InboxRunItemSchema),
+  advanced: z.array(AdvancedDoingItemSchema),
   skipped: z.number().int().nonnegative(),
   errors: z.array(z.string()),
 });

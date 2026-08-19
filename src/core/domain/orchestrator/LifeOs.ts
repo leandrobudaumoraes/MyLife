@@ -21,7 +21,7 @@ import { ensureGtd } from "../gtd/ensure.js";
 import { processInbox } from "../gtd/processInbox.js";
 
 /**
- * Fachada do Life OS: ensure GTD e processa a Inbox.
+ * Fachada do Life OS: ensure GTD, Inbox e avanço de projetos ociosos.
  */
 @injectable()
 export class LifeOs {

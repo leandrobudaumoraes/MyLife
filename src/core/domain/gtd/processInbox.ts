@@ -3,6 +3,7 @@ import type { NotionPort } from "../../ports/NotionPort.js";
 import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { ok, type Result } from "../result.js";
 import { InboxRunSchema, type InboxRun, type TodoistProject, type TodoistTask } from "../schemas.js";
+import { advanceIdleProjects } from "./advanceDoing.js";
 import {
   GTD_ARCHIVE,
   GTD_INCUBATE,
@@ -107,13 +108,25 @@ export async function processInbox(input: {
     }
   }
 
+  const advanced = await advanceIdleProjects({
+    todoist: input.todoist,
+    notion: input.notion,
+    llm: input.llm,
+    tree: input.tree,
+    projects,
+  });
+  if (!advanced.ok) {
+    return advanced;
+  }
+
   return ok(
     InboxRunSchema.parse({
       labelsCreated: [...(input.labelsCreated ?? [])],
-      projectsCreated,
+      projectsCreated: [...projectsCreated, ...advanced.value.projectsCreated],
       processed,
+      advanced: advanced.value.advanced,
       skipped,
-      errors,
+      errors: [...errors, ...advanced.value.errors],
     }),
   );
 }
@@ -248,7 +261,9 @@ async function processProject(
     };
   }
 
-  const existingTitles = new Set(board.value.existingTitles);
+  const existingTitles = new Set(
+    board.value.tasks.map((card) => card.title),
+  );
   for (const planned of tasks) {
     if (existingTitles.has(planned.title)) {
       continue;

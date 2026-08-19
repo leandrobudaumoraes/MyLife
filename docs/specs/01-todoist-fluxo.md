@@ -1,10 +1,11 @@
 # Spec 01 — Fluxo Todoist
 
-Status: **alinhada** (2026-08-18) — 5ª modificação: Notion recebe o quadro; Todoist só a `DOING`  
-Código do processador: **nesta corrida** (ensure GTD + Inbox). A conta **não** precisa existir na mão.
+Status: **alinhada** (2026-08-18) — 7ª modificação: Todoist vazio (tarefa concluída) fecha a `DOING` no Notion e sobe a próxima  
+Código do processador: **nesta corrida** (ensure GTD + Inbox + avanço de projetos ociosos). A conta **não** precisa existir na mão.
 
 Captura humana = **Inbox nativa do Todoist** + **uma** etiqueta de roteamento.  
 Toda corrida começa **materializando o GTD** (idempotente). Depois processa o que já tem `Next`, `Maybe`, `Archive` ou `Project`. O resto fica na Inbox.  
+Em seguida lê os projetos PARA: se o Todoist ficou **sem tarefa aberta** (o humano concluiu lá, não no Notion), fecha a `DOING` no kanban e sobe a próxima.  
 **Não marca Hoje.** Engajar fica para o Watch ou spec futura.
 
 Contrato = **nomes canônicos** desta nota. IDs não entram no domínio: servem só de snapshot da conta atual (§8). A mesma spec sobe uma conta vazia ou a do Leandro.
@@ -157,10 +158,17 @@ flowchart TB
   FILTRO -->|Maybe| MAYBE["Move para Encubar, tira Maybe"]
   FILTRO -->|Archive| ARQ["Move para Arquivar, tira Archive"]
   FILTRO -->|Project| PROJ["Nomeia o PARA, kanban no Notion, captura vira DOING no Todoist"]
+  SKIP --> ADVANCE
+  NEXT --> ADVANCE
+  MAYBE --> ADVANCE
+  ARQ --> ADVANCE
+  PROJ --> ADVANCE
+  ADVANCE["PARA sem tarefa no Todoist: Notion DOING vira DONE, próxima sobe e espelha"]
 ```
 
 Um item `Next` / `Maybe` / `Archive` → **um** destino. Sem data. Sem Hoje.  
-Um item `Project` → **um** projeto PARA + quadro completo no Notion + **uma** DOING no Todoist. Sem data. Sem Hoje.
+Um item `Project` → **um** projeto PARA + quadro completo no Notion + **uma** DOING no Todoist. Sem data. Sem Hoje.  
+Depois da Inbox: se o PARA no Todoist ficou vazio (tarefa concluída lá), o Notion espelha `DONE` e ganha a próxima `DOING` (§3.7).
 
 ### 3.1 Filtrar
 
@@ -213,16 +221,17 @@ Etiquetas de contexto que o humano já tiver na tarefa **permanecem**, salvo a d
 - Mover para projeto de **pilar**
 - Criar um segundo *item* no **Todoist** a partir de um da Inbox
 - Criar etiqueta ou projeto fora das tabelas §2 / §2.2 / §2.3 / §2.4 e dos PARA gerados em §3.5
-- Completar tarefa
+- Completar tarefa **no Todoist** (o humano conclui lá; o processador só espelha `DONE` no Notion)
 - Criar evento no Calendar
 - Marcar Hoje / `due`
 - Etiquetar por pilar
 - Aplicar regra dos 2 minutos
 - Partir um item `Next` / `Maybe` / `Archive` em N tarefas
-- Criar no Todoist tarefas que no Notion não estão em `DOING`
+- Criar no Todoist tarefas que no Notion continuam em `BACKLOG` / `TO DO` / `DONE`
 - Aplicar contexto em `Maybe` ou `Archive`
 - Apagar, fundir ou reparentar projeto que já exista
-- Replanejar um projeto PARA já criado só porque a corrida rodou de novo
+- Replanejar o quadro de um PARA já criado só porque a corrida rodou de novo
+- Promover carta para `DOING` se o PARA no Todoist **ainda** tiver tarefa aberta
 - Criar projeto PARA cujo nome coincida com pilar ou lista GTD
 
 ### 3.5 `Project`: da Inbox para um projeto PARA
@@ -284,9 +293,7 @@ Regras:
 - Teto TDAH: o necessário para o resultado, no máximo ~7 cards **no Notion**. O resto fica de fora — não vira microgestão.
 - A captura original vira a `DOING` (reescrita). Não duplicar o mesmo texto em dois cards.
 
-Corrida seguinte: **não** reescreve o quadro de um PARA já criado. Só entra de novo se aparecer **outro** item na Inbox com `Project` **e** aquele PARA ainda não tiver `Doing`.
-
-Promover um card de `TO DO` / `BACKLOG` para `DOING` **depois** desta corrida — e só então criar a tarefa no Todoist — fica para a próxima fatia. Nesta corrida o espelho Todoist nasce junto com o card `DOING` inicial.
+Corrida seguinte: **não** reescreve o quadro de um PARA já criado. Só entra de novo na Inbox se aparecer **outro** item com `Project` **e** aquele PARA ainda não tiver `Doing`. O avanço de `TO DO` / `BACKLOG` para `DOING` é a §3.7, não um replanejamento.
 
 ### 3.6 `Project`: espelho no Notion
 
@@ -331,6 +338,26 @@ Se o banco filho / a vista já existirem na página (projeto reusado), **não** 
 
 Calendar continua fora. Vault não recebe página desta corrida.
 
+### 3.7 Projetos ociosos: próxima `DOING`
+
+O humano **conclui no Todoist**, não no Notion. O kanban fica stale até a corrida. Depois da Inbox, **toda corrida** lê as linhas do banco Notion `Projects` que já tiverem o banco filho `Tarefas` e cruza com o PARA de mesmo nome no Todoist.
+
+Sinal de avanço: o PARA **não tem nenhuma tarefa aberta** — a `Doing` foi concluída (o `listTasks` do projeto volta vazio). Não olha a coluna Notion para decidir se o projeto está parado.
+
+Para cada linha:
+
+1. Página sem banco `Tarefas` → ignora. Não cria quadro nesta fatia.
+2. PARA no Todoist **com qualquer tarefa aberta** → **não promove**. WIP = 1. O humano ainda está nela.
+3. PARA existente e **vazio** (concluiu no Todoist):
+   1. Todo card Notion em `DOING` vira `DONE` — espelho da conclusão.
+   2. Escolhe **uma** carta: a primeira `TO DO`; se não houver, a primeira `BACKLOG`. `DONE` nunca sobe.
+   3. Sem `TO DO` nem `BACKLOG` → só o espelho `DONE`. Não inventa card.
+   4. Move essa carta para `DOING` no Notion.
+   5. **Cria** no Todoist a tarefa correspondente: mesmo título GTD, `Doing` + contexto §2.3, sem due. Não copia para `⏩ Próximas ações`.
+4. PARA **ainda não existe** no Todoist: não é conclusão. Se o kanban já tem `DOING`, cria o filho de `📁 Projetos` e espelha essa carta. Se não tem, promove a primeira `TO DO` (senão `BACKLOG`) e espelha. Não marca `DONE`.
+
+Projeto que esta mesma corrida acabou de abrir pelo caminho `Project` ainda tem a tarefa no Todoist — a §3.7 o pula.
+
 ---
 
 ## 4. Engajar (Hoje)
@@ -347,11 +374,13 @@ Calendar continua fora. Vault não recebe página desta corrida.
 | `createProject` | Ensure: lista GTD, pasta `📁 Projetos` ou pilar. `Project`: filho PARA |
 | listar / criar etiqueta | Ensure: catálogo §2.2, §2.3 e §2.4 |
 | `listTasks` (Inbox) | Captura filtrada |
+| `listTasks` (PARA) | §3.7: se o projeto está vazio, a `Doing` foi concluída |
 | ler descrição e comentários | `Project`: nomear e planejar |
 | mover / atualizar conteúdo e etiquetas | Organizar; converter a captura em DOING |
-| criar tarefa | **Não chama** no caminho `Project` (BACKLOG/TO DO/DONE ficam só no Notion) |
+| criar tarefa | Caminho `Project`: **não chama** (converte a captura). §3.7: **chama** só para a carta promovida a `DOING` |
 | Notion: criar/reusar linha em `Projects` | Espelho §3.6.1 |
 | Notion: banco filho `Tarefas` + board + cards do quadro | Espelho §3.6.2 |
+| Notion: listar cards e atualizar coluna | §3.7: `DOING` → `DONE` (espelho da conclusão no Todoist); `TO DO` / `BACKLOG` → `DOING` |
 | `updateTaskDue` | **Não chama** |
 | `completeTask` | **Não chama** |
 
@@ -377,8 +406,9 @@ O Second Brain ainda tem seis pilares, outros nomes, sem Amizades / Financeiro. 
 8. `Project` → lê título, descrição, comentários e conteúdo; nomeia o resultado; cria (ou reusa) um filho de `📁 Projetos`; monta o kanban no Notion; converte a captura na única `DOING` do Todoist; tira `Project`; põe `Doing` + contexto só nela. **Não** cria no Todoist o que no Notion está em BACKLOG / TO DO / DONE.
 9. O mesmo `Project` abre (ou reusa) uma linha no banco Notion `Projects` e um kanban `BACKLOG` / `TO DO` / `DOING` / `DONE` na página. Cards iniciais saem do script. Só o card `DOING` tem espelho no Todoist.
 10. Toda corrida relê a Inbox atrás de `Project` novo. Não replaneja PARA já criado. Não abre segunda `DOING` no Todoist: se já houver `Doing`, a captura fica na Inbox.
-11. Esta corrida **não** marca Hoje e **não** move para pilar.
-12. Sem lista Aguardando. Sem Engenharia. Ensure não apaga o que já existe.
+11. Toda corrida, depois da Inbox, cruza kanban Notion × PARA no Todoist. Humano conclui **no Todoist**. PARA vazio: cards `DOING` viram `DONE`; sobe a primeira `TO DO` (senão `BACKLOG`) e cria essa tarefa no Todoist com `Doing` + contexto. PARA com tarefa aberta não mexe. Página sem `Tarefas` fica de fora.
+12. Esta corrida **não** marca Hoje e **não** move para pilar.
+13. Sem lista Aguardando. Sem Engenharia. Ensure não apaga o que já existe.
 
 Próximas modificações ficam de fora desta nota até o Leandro pedir.
 
