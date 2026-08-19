@@ -26,11 +26,21 @@ export const ROUTING_LABELS = [
   "Maybe",
   "Archive",
   "Project",
+  "Event",
 ] as const;
 
 export type RoutingLabel = (typeof ROUTING_LABELS)[number];
 
 export const STATE_LABEL_DOING = "Doing" as const;
+export const STATE_LABEL_PENDING = "Pending" as const;
+
+export const PENDING_FILTER = {
+  name: "Pendentes",
+  query: "@Pending",
+  color: "red",
+} as const;
+
+export const FILTER_CATALOG = [PENDING_FILTER] as const;
 
 export const NOTION_PROJECT_STATUS_IN_PROGRESS = "Em andamento" as const;
 
@@ -61,7 +71,9 @@ export const LABEL_CATALOG = [
   { name: "Maybe", color: "yellow" },
   { name: "Archive", color: "grey" },
   { name: "Project", color: "blue" },
+  { name: "Event", color: "teal" },
   { name: "Doing", color: "orange" },
+  { name: "Pending", color: "red" },
   { name: "Casa", color: "salmon" },
   { name: "Rua", color: "salmon" },
   { name: "Carro", color: "salmon" },

@@ -63,6 +63,22 @@ export type CreateTodoistLabelInput = z.infer<
   typeof CreateTodoistLabelInputSchema
 >;
 
+export const TodoistFilterSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  query: z.string(),
+});
+export type TodoistFilter = z.infer<typeof TodoistFilterSchema>;
+
+export const CreateTodoistFilterInputSchema = z.object({
+  name: z.string(),
+  query: z.string(),
+  color: z.string(),
+});
+export type CreateTodoistFilterInput = z.infer<
+  typeof CreateTodoistFilterInputSchema
+>;
+
 export const CreateTodoistTaskInputSchema = z.object({
   content: z.string(),
   projectId: z.string(),
@@ -132,6 +148,7 @@ export const InboxRoutingSchema = z.enum([
   "Maybe",
   "Archive",
   "Project",
+  "Event",
 ]);
 export type InboxRouting = z.infer<typeof InboxRoutingSchema>;
 
@@ -150,6 +167,7 @@ export type AdvancedDoingItem = z.infer<typeof AdvancedDoingItemSchema>;
 
 export const InboxRunSchema = z.object({
   labelsCreated: z.array(z.string()),
+  filtersCreated: z.array(z.string()),
   projectsCreated: z.array(z.string()),
   processed: z.array(InboxRunItemSchema),
   advanced: z.array(AdvancedDoingItemSchema),
@@ -179,14 +197,38 @@ export const CalendarEventSchema = z.object({
   summary: z.string(),
   range: TimeRangeSchema,
   htmlLink: z.string().nullable(),
+  allDay: z.boolean(),
 });
 export type CalendarEvent = z.infer<typeof CalendarEventSchema>;
 
 export const ListEventsQuerySchema = z.object({
   date: z.string(),
+  untilDate: z.string().optional(),
   calendarId: z.string(),
 });
 export type ListEventsQuery = z.infer<typeof ListEventsQuerySchema>;
+
+export const EventRecurrenceFreqSchema = z.enum(["DAILY", "WEEKLY", "MONTHLY"]);
+export type EventRecurrenceFreq = z.infer<typeof EventRecurrenceFreqSchema>;
+
+export const WeekdayCodeSchema = z.enum([
+  "MO",
+  "TU",
+  "WE",
+  "TH",
+  "FR",
+  "SA",
+  "SU",
+]);
+export type WeekdayCode = z.infer<typeof WeekdayCodeSchema>;
+
+export const EventRecurrenceSchema = z.object({
+  freq: EventRecurrenceFreqSchema,
+  interval: z.number().int().positive().default(1),
+  byDay: z.array(WeekdayCodeSchema).default([]),
+  until: z.string().nullable().default(null),
+});
+export type EventRecurrence = z.infer<typeof EventRecurrenceSchema>;
 
 export const UpsertEventInputSchema = z.object({
   eventId: z.string().nullable(),
@@ -194,6 +236,7 @@ export const UpsertEventInputSchema = z.object({
   summary: z.string(),
   range: TimeRangeSchema,
   description: z.string().nullable(),
+  recurrence: EventRecurrenceSchema.nullable(),
 });
 export type UpsertEventInput = z.infer<typeof UpsertEventInputSchema>;
 

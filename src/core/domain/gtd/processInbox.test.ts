@@ -1,26 +1,33 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import type { CalendarPort } from "../../ports/CalendarPort.js";
 import type { LlmPort } from "../../ports/LlmPort.js";
 import type { NotionPort } from "../../ports/NotionPort.js";
 import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { ok, type Result } from "../result.js";
 import type {
+  CalendarEvent,
   CreateProjectTaskInput,
+  CreateTodoistFilterInput,
   CreateTodoistLabelInput,
   CreateTodoistProjectInput,
   CreateTodoistTaskInput,
+  DeleteEventInput,
   KanbanColumn,
+  ListEventsQuery,
   ListTasksQuery,
   NotionPage,
   ProjectTaskBoard,
   ProjectTaskCard,
+  TodoistFilter,
   TodoistLabel,
   TodoistProject,
   TodoistTask,
   UpdateProjectTaskColumnInput,
   UpdateTodoistTaskPatch,
   UpsertChildPageInput,
+  UpsertEventInput,
   UpsertProjectPageInput,
 } from "../schemas.js";
 import type { GtdTree } from "./ensure.js";
@@ -216,6 +223,254 @@ test("Next move para Próximas ações e tira a etiqueta de roteamento", async (
   assert.equal(moved?.projectId, "next");
   assert.equal(moved?.labels.includes("Next"), false);
   assert.ok(moved?.labels.includes("Celular"));
+});
+
+test("Event com slot livre cria no Calendar e completa a tarefa", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Consulta com nutrologo",
+      labels: ["Event"],
+    }),
+  ]);
+  const calendar = new MemoryCalendar();
+  const result = await processInbox({
+    todoist,
+    notion: new MemoryNotion(),
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: false,
+        start: "2026-08-20T10:00:00-03:00",
+        end: "2026-08-20T11:00:00-03:00",
+        recurrence: null,
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-18",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.processed[0]?.routing, "Event");
+  assert.equal(todoist.tasks[0]?.isCompleted, true);
+  assert.equal(todoist.tasks[0]?.projectId, "inbox");
+  assert.ok(todoist.tasks[0]?.labels.includes("Event"));
+  assert.equal(calendar.inserts.length, 1);
+  assert.equal(calendar.inserts[0]?.summary, "Consulta com nutrologo");
+  assert.equal(calendar.inserts[0]?.description, null);
+  assert.equal(calendar.inserts[0]?.recurrence, null);
+});
+
+test("Event com Pending não é varrido de novo", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Consulta com nutrologo",
+      labels: ["Event", "Pending"],
+    }),
+  ]);
+  const calendar = new MemoryCalendar();
+  const result = await processInbox({
+    todoist,
+    notion: new MemoryNotion(),
+    llm: new ScriptedLlm([]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-18",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.skipped, 1);
+  assert.equal(result.value.processed.length, 0);
+  assert.equal(calendar.inserts.length, 0);
+  assert.equal(todoist.comments.get("t-event")?.length ?? 0, 0);
+});
+
+test("Event com horário ilegível ganha Pending e fica na Inbox", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Consulta com nutrologo",
+      labels: ["Event"],
+    }),
+  ]);
+  const calendar = new MemoryCalendar();
+  const result = await processInbox({
+    todoist,
+    notion: new MemoryNotion(),
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: true,
+        start: null,
+        end: null,
+        recurrence: null,
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-18",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.processed[0]?.detail, "Pending: horário ilegível");
+  assert.equal(todoist.tasks[0]?.isCompleted, false);
+  assert.equal(todoist.tasks[0]?.projectId, "inbox");
+  assert.ok(todoist.tasks[0]?.labels.includes("Event"));
+  assert.ok(todoist.tasks[0]?.labels.includes("Pending"));
+  assert.deepEqual(todoist.comments.get("t-event"), ["horário ilegível"]);
+  assert.equal(calendar.inserts.length, 0);
+});
+
+test("Event em conflito não cria e trava com Pending", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Consulta com nutrologo",
+      labels: ["Event"],
+    }),
+  ]);
+  const calendar = new MemoryCalendar();
+  calendar.events.push({
+    eventId: "busy",
+    calendarId: "gmail",
+    summary: "ENGENHARIA - PagBank coordenação",
+    range: {
+      start: { iso: "2026-08-20T09:00:00-03:00" },
+      end: { iso: "2026-08-20T12:00:00-03:00" },
+    },
+    htmlLink: null,
+    allDay: false,
+  });
+  const result = await processInbox({
+    todoist,
+    notion: new MemoryNotion(),
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: false,
+        start: "2026-08-20T10:00:00-03:00",
+        end: "2026-08-20T11:00:00-03:00",
+        recurrence: null,
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-18",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(calendar.inserts.length, 0);
+  assert.ok(todoist.tasks[0]?.labels.includes("Pending"));
+  assert.ok(
+    todoist.comments
+      .get("t-event")?.[0]
+      ?.includes("conflito com ENGENHARIA - PagBank coordenação"),
+  );
+});
+
+test("dia inteiro no Calendar não conta como conflito do Event", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Consulta com nutrologo",
+      labels: ["Event"],
+    }),
+  ]);
+  const calendar = new MemoryCalendar();
+  calendar.events.push({
+    eventId: "holiday",
+    calendarId: "gmail",
+    summary: "Feriado",
+    range: {
+      start: { iso: "2026-08-20T00:00:00-03:00" },
+      end: { iso: "2026-08-21T00:00:00-03:00" },
+    },
+    htmlLink: null,
+    allDay: true,
+  });
+  const result = await processInbox({
+    todoist,
+    notion: new MemoryNotion(),
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: false,
+        start: "2026-08-20T10:00:00-03:00",
+        end: null,
+        recurrence: null,
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-18",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(calendar.inserts.length, 1);
+  assert.equal(todoist.tasks[0]?.isCompleted, true);
+  assert.equal(
+    calendar.inserts[0]?.range.end.iso,
+    "2026-08-20T11:00:00-03:00",
+  );
+});
+
+test("Event recorrente em conflito não cria série pela metade", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Consulta com nutrologo",
+      labels: ["Event"],
+    }),
+  ]);
+  const calendar = new MemoryCalendar();
+  calendar.events.push({
+    eventId: "busy",
+    calendarId: "gmail",
+    summary: "FAMILIA - Escola",
+    range: {
+      start: { iso: "2026-08-22T10:00:00-03:00" },
+      end: { iso: "2026-08-22T10:30:00-03:00" },
+    },
+    htmlLink: null,
+    allDay: false,
+  });
+  const result = await processInbox({
+    todoist,
+    notion: new MemoryNotion(),
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: false,
+        start: "2026-08-20T10:00:00-03:00",
+        end: "2026-08-20T11:00:00-03:00",
+        recurrence: { freq: "DAILY", interval: 1, byDay: [], until: null },
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-18",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(calendar.inserts.length, 0);
+  assert.ok(todoist.tasks[0]?.labels.includes("Event"));
+  assert.ok(todoist.tasks[0]?.labels.includes("Pending"));
+  assert.equal(todoist.tasks[0]?.isCompleted, false);
 });
 
 test("projeto Notion sem DOING promove TO DO e espelha no Todoist", async () => {
@@ -948,6 +1203,8 @@ class MemoryTodoist implements TodoistPort {
     },
   ];
   labels: TodoistLabel[] = [];
+  filters: TodoistFilter[] = [];
+  comments = new Map<string, string[]>();
   private seq = 10;
 
   constructor(public tasks: TodoistTask[]) {}
@@ -967,8 +1224,17 @@ class MemoryTodoist implements TodoistPort {
     return found ? ok(found) : ok(this.tasks[0] ?? task({ id, content: "", labels: [] }));
   }
 
-  async listTaskComments(_taskId: string): Promise<Result<readonly string[]>> {
-    return ok(["urgente para o sábado"]);
+  async listTaskComments(taskId: string): Promise<Result<readonly string[]>> {
+    return ok(this.comments.get(taskId) ?? []);
+  }
+
+  async addTaskComment(
+    taskId: string,
+    content: string,
+  ): Promise<Result<void>> {
+    const existing = this.comments.get(taskId) ?? [];
+    this.comments.set(taskId, [...existing, content]);
+    return ok(undefined);
   }
 
   async updateTask(
@@ -1056,6 +1322,73 @@ class MemoryTodoist implements TodoistPort {
     this.seq += 1;
     this.labels.push(label);
     return ok(label);
+  }
+
+  async listFilters(): Promise<Result<readonly TodoistFilter[]>> {
+    return ok(this.filters);
+  }
+
+  async createFilter(
+    input: CreateTodoistFilterInput,
+  ): Promise<Result<TodoistFilter>> {
+    const filter: TodoistFilter = {
+      id: `f${this.seq}`,
+      name: input.name,
+      query: input.query,
+    };
+    this.seq += 1;
+    this.filters.push(filter);
+    return ok(filter);
+  }
+}
+
+class MemoryCalendar implements CalendarPort {
+  events: CalendarEvent[] = [];
+  inserts: UpsertEventInput[] = [];
+  private seq = 1;
+
+  async listEvents(
+    query: ListEventsQuery,
+  ): Promise<Result<readonly CalendarEvent[]>> {
+    const from = Date.parse(`${query.date}T00:00:00-03:00`);
+    const untilDate = query.untilDate ?? query.date;
+    const [, month, day] = untilDate.split("-").map(Number);
+    const year = Number(untilDate.slice(0, 4));
+    const next = new Date(Date.UTC(year, (month ?? 1) - 1, (day ?? 1) + 1))
+      .toISOString()
+      .slice(0, 10);
+    const until = Date.parse(`${next}T00:00:00-03:00`);
+    return ok(
+      this.events.filter((event) => {
+        if (event.calendarId !== query.calendarId) {
+          return false;
+        }
+        const start = Date.parse(event.range.start.iso);
+        const end = Date.parse(event.range.end.iso);
+        return start < until && end > from;
+      }),
+    );
+  }
+
+  async upsertEvent(
+    input: UpsertEventInput,
+  ): Promise<Result<CalendarEvent>> {
+    this.inserts.push(input);
+    const created: CalendarEvent = {
+      eventId: input.eventId ?? `e${this.seq}`,
+      calendarId: input.calendarId,
+      summary: input.summary,
+      range: input.range,
+      htmlLink: null,
+      allDay: false,
+    };
+    this.seq += 1;
+    this.events.push(created);
+    return ok(created);
+  }
+
+  async deleteEvent(_input: DeleteEventInput): Promise<Result<void>> {
+    return ok(undefined);
   }
 }
 

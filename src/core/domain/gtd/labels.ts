@@ -3,6 +3,7 @@ import {
   CONTEXT_LOCATIONS,
   isContextLabel,
   STATE_LABEL_DOING,
+  STATE_LABEL_PENDING,
 } from "./catalog.js";
 
 export function mergeContextLabels(
@@ -58,4 +59,10 @@ export function withDoingLabel(labels: readonly string[]): string[] {
 
 export function withoutDoingLabel(labels: readonly string[]): string[] {
   return labels.filter((label) => label !== STATE_LABEL_DOING);
+}
+
+export function withPendingLabel(labels: readonly string[]): string[] {
+  return labels.includes(STATE_LABEL_PENDING)
+    ? [...labels]
+    : [...labels, STATE_LABEL_PENDING];
 }

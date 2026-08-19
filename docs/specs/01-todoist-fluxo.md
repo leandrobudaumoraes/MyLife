@@ -1,11 +1,11 @@
 # Spec 01 — Fluxo Todoist
 
-Status: **proposta** (2026-08-18) — 9ª modificação: Inbox `Event` cria no Calendar; conflito aborta e trava com `Pendent`  
-Código do processador `Event`: **depois** desta fatia confirmada. Ensure GTD + Inbox + avanço de projetos ociosos **já** rodam. A conta **não** precisa existir na mão.
+Status: **alinhada** (2026-08-18) — 10ª: caminho `Event` no Calendar Gmail  
+Código do processador: **nesta corrida** (ensure GTD + Inbox + avanço + `Event`). A conta **não** precisa existir na mão.
 
 Captura humana = **Inbox nativa do Todoist** + **uma** etiqueta de roteamento.  
 Toda corrida começa **materializando o GTD** (idempotente). Depois processa o que já tem `Next`, `Maybe`, `Archive`, `Project` ou `Event`. O resto fica na Inbox.  
-Item `Event` **com** `Pendent`: **não varre**. O humano tira `Pendent` quando o texto ou o horário estiverem corrigidos.  
+Item `Event` **com** `Pending`: **não varre**. O humano tira `Pending` quando o texto ou o horário estiverem corrigidos.  
 Em seguida lê os projetos PARA **em andamento** no Notion: se o Todoist ficou **sem tarefa aberta** (o humano concluiu lá, não no Notion), fecha a `DOING` no kanban e sobe a próxima.  
 Projeto com `Status` ≠ `Em andamento` **não** entra nessa análise. O humano pausa no Notion; retoma no Todoist com um `Doing` (ou volta o `Status` para `Em andamento`).  
 **Não marca Hoje.** Engajar fica para o Watch ou spec futura.
@@ -116,7 +116,7 @@ O ensure cria se faltarem. Nomes exatos, em inglês. Só estas cinco disparam o 
 
 `Next` / `Maybe` / `Archive` / `Project`: depois de processar, **remove** a etiqueta de roteamento. Ela não viaja com o item.
 
-`Event`: no sucesso, **completa** a tarefa (a instrução foi executada). No conflito ou horário ilegível, **mantém** `Event` e acrescenta `Pendent` (§2.5).
+`Event`: no sucesso, **completa** a tarefa (a instrução foi executada). No conflito ou horário ilegível, **mantém** `Event` e acrescenta `Pending` (§2.5).
 
 Item na Inbox **sem** uma dessas cinco: **ignora**. Não move, não apaga, não reescreve.
 
@@ -151,21 +151,21 @@ No máximo **uma** tarefa com `Doing` por projeto PARA. As demais tarefas daquel
 
 ### 2.5 Estado e filtro (`Event`)
 
-O ensure cria se faltarem. `Pendent` viaja com o item. Não é roteamento: sozinha **não** tira a tarefa da Inbox.
+O ensure cria se faltarem. `Pending` viaja com o item. Não é roteamento: sozinha **não** tira a tarefa da Inbox.
 
 | Etiqueta | Cor | Papel |
 |---|---|---|
-| `Pendent` | `red` | Trava o `Event`: a corrida **não varre** de novo até o humano **remover** esta etiqueta |
+| `Pending` | `red` | Trava o `Event`: a corrida **não varre** de novo até o humano **remover** esta etiqueta |
 
 Filtro canônico (Watch / desktop). O humano não cria na mão.
 
 | Nome | Query |
 |---|---|
-| `Pendentes` | `@Pendent` |
+| `Pendentes` | `@Pending` |
 
-Com `Event` + `Pendent`: o processador **pula**. Não comenta de novo. Não cria evento. Não tira `Event`.
+Com `Event` + `Pending`: o processador **pula**. Não comenta de novo. Não cria evento. Não tira `Event`.
 
-O humano corrige título/descrição (ou a grade) e **remove só** `Pendent`. `Event` permanece — a próxima corrida tenta de novo.
+O humano corrige título/descrição (ou a grade) e **remove só** `Pending`. `Event` permanece — a próxima corrida tenta de novo.
 
 ---
 
@@ -182,10 +182,10 @@ flowchart TB
   FILTRO -->|Maybe| MAYBE["Move para Encubar, tira Maybe"]
   FILTRO -->|Archive| ARQ["Move para Arquivar, tira Archive"]
   FILTRO -->|Project| PROJ["Nomeia o PARA, kanban no Notion, captura vira DOING no Todoist"]
-  FILTRO -->|Event| PEND{"Tem Pendent?"}
+  FILTRO -->|Event| PEND{"Tem Pending?"}
   PEND -->|sim| SKIP
   PEND -->|não| SLOT{"Horário livre no Calendar?"}
-  SLOT -->|não ou ilegível| LOCK["Abortar: põe Pendent + comentário; Event fica"]
+  SLOT -->|não ou ilegível| LOCK["Abortar: põe Pending + comentário; Event fica"]
   SLOT -->|sim| CAL["Cria no Gmail e completa a tarefa"]
   SKIP --> ADVANCE
   NEXT --> ADVANCE
@@ -199,7 +199,7 @@ flowchart TB
 
 Um item `Next` / `Maybe` / `Archive` → **um** destino. Sem data. Sem Hoje.  
 Um item `Project` → **um** projeto PARA + quadro completo no Notion + **uma** DOING no Todoist. Sem data. Sem Hoje.  
-Um item `Event` → **um** compromisso no Calendar se o slot estiver livre; senão aborta e trava com `Pendent` (§3.8).  
+Um item `Event` → **um** compromisso no Calendar se o slot estiver livre; senão aborta e trava com `Pending` (§3.8).  
 Depois da Inbox: se o PARA **em andamento** no Todoist ficou vazio (tarefa concluída lá), o Notion espelha `DONE` e ganha a próxima `DOING` (§3.7).
 
 ### 3.1 Filtrar
@@ -208,7 +208,7 @@ Para cada item da Inbox:
 
 1. Contar etiquetas `Next`, `Maybe`, `Archive`, `Project`, `Event`.
 2. Zero ou mais de uma → pular.
-3. `Event` com `Pendent` → pular (§2.5).
+3. `Event` com `Pending` → pular (§2.5).
 4. Uma → organizar (§3.2, §3.5 ou §3.8).
 
 Não lê carga dos pilares nesta fatia. O humano já filtrou o destino.
@@ -221,7 +221,7 @@ Não lê carga dos pilares nesta fatia. O humano já filtrou o destino.
 | `Maybe` | `💤 Encubar` | Não mexe | Remove `Maybe`. Não adiciona etiqueta |
 | `Archive` | `📌 Arquivar` | Não mexe | Remove `Archive`. Não adiciona etiqueta |
 | `Project` | Filho novo (ou reusado) de `📁 Projetos` | §3.5 | Remove `Project`. Ver §3.5 |
-| `Event` | Calendar Gmail (§3.8) | Não mexe | Sucesso: completa. Falha: mantém `Event`, acrescenta `Pendent` |
+| `Event` | Calendar Gmail (§3.8) | Não mexe | Sucesso: completa. Falha: mantém `Event`, acrescenta `Pending` |
 
 `💤 Encubar` guarda o que **não será pego ainda**, porém algum dia talvez.
 
@@ -252,7 +252,7 @@ Etiquetas de contexto que o humano já tiver na tarefa **permanecem**, salvo a d
 ### 3.4 O que o processador não faz
 
 - Processar item sem `Next` / `Maybe` / `Archive` / `Project` / `Event`
-- Varrer `Event` que ainda tem `Pendent`
+- Varrer `Event` que ainda tem `Pending`
 - Mover para projeto de **pilar**
 - Criar um segundo *item* no **Todoist** a partir de um da Inbox
 - Criar etiqueta, projeto ou filtro fora das tabelas §2 / §2.2 / §2.3 / §2.4 / §2.5 e dos PARA gerados em §3.5
@@ -406,7 +406,7 @@ Projeto que esta mesma corrida acabou de abrir pelo caminho `Project` ainda tem 
 
 ### 3.8 `Event`: da Inbox para o Calendar
 
-Toda corrida relê a Inbox. Item com exatamente a etiqueta `Event` e **sem** `Pendent` vira compromisso no Gmail — consulta, reunião pontual, o que o texto pedir. Não entra na série canônica do Protocolo de Agenda. Não ganha spec no Notion.
+Toda corrida relê a Inbox. Item com exatamente a etiqueta `Event` e **sem** `Pending` vira compromisso no Gmail — consulta, reunião pontual, o que o texto pedir. Não entra na série canônica do Protocolo de Agenda. Não ganha spec no Notion.
 
 Exemplo:
 
@@ -445,16 +445,16 @@ A grade canônica **não cede**. O processador **não** apaga ocorrência nem s�
 
 Uma ocorrência em conflito → aborta **tudo**. Não cria série pela metade.
 
-#### 3.8.3 Abortar (`Pendent`)
+#### 3.8.3 Abortar (`Pending`)
 
 Se o horário for ilegível **ou** conflitar:
 
 1. **Não** chama `upsertEvent`.
-2. Acrescenta `Pendent`. `Event` permanece.
+2. Acrescenta `Pending`. `Event` permanece.
 3. Um comentário na tarefa com o motivo (`conflito com ENGENHARIA - PagBank coordenação 09:00–12:00` ou `horário ilegível`).
 4. A tarefa **fica na Inbox**.
 
-Corridas seguintes pulam este item até o humano remover `Pendent`. O filtro `Pendentes` (`@Pendent`) é a lista de espera.
+Corridas seguintes pulam este item até o humano remover `Pending`. O filtro `Pendentes` (`@Pending`) é a lista de espera.
 
 #### 3.8.4 Sucesso
 
@@ -479,12 +479,12 @@ Slot livre:
 | `listProjects` | Ensure: detectar falta; `Project`: listar filhos de `📁 Projetos` |
 | `createProject` | Ensure: lista GTD, pasta `📁 Projetos` ou pilar. `Project`: filho PARA |
 | listar / criar etiqueta | Ensure: catálogo §2.2, §2.3, §2.4 e §2.5 |
-| listar / criar filtro | Ensure: `Pendentes` (`@Pendent`) |
+| listar / criar filtro | Ensure: `Pendentes` (`@Pending`) |
 | `listTasks` (Inbox) | Captura filtrada |
 | `listTasks` (PARA) | §3.7: se o projeto está vazio, a `Doing` foi concluída |
 | ler descrição e comentários | `Project`: nomear e planejar. `Event`: extrair horário |
-| criar comentário | `Event`: motivo do `Pendent` |
-| mover / atualizar conteúdo e etiquetas | Organizar; converter a captura em DOING; `Event` abortado: pôr `Pendent` |
+| criar comentário | `Event`: motivo do `Pending` |
+| mover / atualizar conteúdo e etiquetas | Organizar; converter a captura em DOING; `Event` abortado: pôr `Pending` |
 | criar tarefa | Caminho `Project`: **não chama** (converte a captura). §3.7: **chama** só para a carta promovida a `DOING` |
 | Notion: criar/reusar linha em `Projects` | Espelho §3.6.1 |
 | Notion: banco filho `Tarefas` + board + cards do quadro | Espelho §3.6.2 |
@@ -519,7 +519,7 @@ O Second Brain ainda tem seis pilares, outros nomes, sem Amizades / Financeiro. 
 9. O mesmo `Project` abre (ou reusa) uma linha no banco Notion `Projects` e um kanban `BACKLOG` / `TO DO` / `DOING` / `DONE` na página. Cards iniciais saem do script. Só o card `DOING` tem espelho no Todoist.
 10. Toda corrida relê a Inbox atrás de `Project` novo. Não replaneja PARA já criado. Não abre segunda `DOING` no Todoist: se já houver `Doing`, a captura fica na Inbox.
 11. Toda corrida, depois da Inbox, cruza kanban Notion × PARA no Todoist **só nas linhas `Em andamento`**. Humano conclui **no Todoist**. PARA vazio: cards `DOING` viram `DONE`; sobe a primeira `TO DO` (senão `BACKLOG`) e cria essa tarefa no Todoist com `Doing` + contexto. PARA com tarefa aberta não mexe. Página sem `Tarefas` fica de fora. `Pausado` / `Não iniciada` / `Concluído`: não promove; PARA vazio só espelha `DONE`. Retomada: `Status` de volta a `Em andamento`, ou um `Doing` novo no Todoist depois que o kanban já não tem `DOING`.
-12. `Event` → lê título, descrição, comentários e conteúdo; propõe um intervalo no Calendar Gmail. Slot livre: cria o evento e **completa** a tarefa. Conflito ou horário ilegível: **não cria**; põe `Pendent` + comentário; `Event` fica. Com `Pendent`, a corrida **não varre**. O humano tira `Pendent` para tentar de novo. Filtro `Pendentes` = `@Pendent`.
+12. `Event` → lê título, descrição, comentários e conteúdo; propõe um intervalo no Calendar Gmail. Slot livre: cria o evento e **completa** a tarefa. Conflito ou horário ilegível: **não cria**; põe `Pending` + comentário; `Event` fica. Com `Pending`, a corrida **não varre**. O humano tira `Pending` para tentar de novo. Filtro `Pendentes` = `@Pending`.
 13. `Event` **não** apaga série da grade, **não** marca due, **não** cria spec Notion, **não** aplica contexto.
 14. Esta corrida **não** marca Hoje e **não** move para pilar.
 15. Sem lista Aguardando. Sem Engenharia. Ensure não apaga o que já existe.

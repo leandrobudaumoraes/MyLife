@@ -1,8 +1,15 @@
+import type { CalendarPort } from "../../ports/CalendarPort.js";
 import type { LlmPort } from "../../ports/LlmPort.js";
 import type { NotionPort } from "../../ports/NotionPort.js";
 import type { TodoistPort } from "../../ports/TodoistPort.js";
+import { civilDateNow } from "../clock.js";
 import { ok, type Result } from "../result.js";
-import { InboxRunSchema, type InboxRun, type TodoistProject, type TodoistTask } from "../schemas.js";
+import {
+  InboxRunSchema,
+  type InboxRun,
+  type TodoistProject,
+  type TodoistTask,
+} from "../schemas.js";
 import { advanceIdleProjects } from "./advanceDoing.js";
 import {
   GTD_ARCHIVE,
@@ -10,11 +17,28 @@ import {
   GTD_NEXT_ACTIONS,
   PILLAR_PROJECTS,
   STATE_LABEL_DOING,
+  STATE_LABEL_PENDING,
 } from "./catalog.js";
 import type { GtdTree } from "./ensure.js";
+import {
+  conflictComment,
+  conflictWindow,
+  expandOccurrences,
+  EventSlotSchema,
+  findConflict,
+  resolveEventSlot,
+} from "./eventPlan.js";
 import { extractJson } from "./json.js";
-import { mergeContextLabels, withDoingLabel } from "./labels.js";
-import { nextRewritePrompt, projectPlanPrompt } from "./prompts.js";
+import {
+  mergeContextLabels,
+  withDoingLabel,
+  withPendingLabel,
+} from "./labels.js";
+import {
+  eventSlotPrompt,
+  nextRewritePrompt,
+  projectPlanPrompt,
+} from "./prompts.js";
 import {
   doingTaskOf,
   isUsableProjectPlan,
@@ -31,7 +55,11 @@ export async function processInbox(input: {
   readonly notion: NotionPort;
   readonly llm: LlmPort;
   readonly tree: GtdTree;
+  readonly calendar?: CalendarPort;
+  readonly calendarId?: string;
+  readonly today?: string;
   readonly labelsCreated?: readonly string[];
+  readonly filtersCreated?: readonly string[];
   readonly projectsCreated?: readonly string[];
 }): Promise<Result<InboxRun>> {
   const processed: InboxRun["processed"] = [];
@@ -83,6 +111,28 @@ export async function processInbox(input: {
         });
         continue;
       }
+      if (decision.kind === "Event") {
+        if (task.labels.includes(STATE_LABEL_PENDING)) {
+          skipped += 1;
+          continue;
+        }
+        if (!input.calendar || !input.calendarId) {
+          skipped += 1;
+          continue;
+        }
+        const detail = await processEvent(
+          {
+            todoist: input.todoist,
+            llm: input.llm,
+            calendar: input.calendar,
+            calendarId: input.calendarId,
+            today: input.today ?? civilDateNow(),
+          },
+          task,
+        );
+        processed.push({ taskId: task.id, routing: "Event", detail });
+        continue;
+      }
 
       const result = await processProject(input, task, projects);
       if (result.status === "skipped") {
@@ -122,6 +172,7 @@ export async function processInbox(input: {
   return ok(
     InboxRunSchema.parse({
       labelsCreated: [...(input.labelsCreated ?? [])],
+      filtersCreated: [...(input.filtersCreated ?? [])],
       projectsCreated: [...projectsCreated, ...advanced.value.projectsCreated],
       processed,
       advanced: advanced.value.advanced,
@@ -129,6 +180,86 @@ export async function processInbox(input: {
       errors: [...errors, ...advanced.value.errors],
     }),
   );
+}
+
+async function processEvent(
+  input: {
+    readonly todoist: TodoistPort;
+    readonly llm: LlmPort;
+    readonly calendar: CalendarPort;
+    readonly calendarId: string;
+    readonly today: string;
+  },
+  task: TodoistTask,
+): Promise<string> {
+  const comments = await input.todoist.listTaskComments(task.id);
+  if (!comments.ok) {
+    throw new Error(comments.error.message);
+  }
+
+  const reply = await input.llm.complete(
+    eventSlotPrompt({ task, comments: comments.value, today: input.today }),
+  );
+  if (!reply.ok) {
+    throw new Error(reply.error.message);
+  }
+
+  let slot;
+  try {
+    slot = EventSlotSchema.parse(extractJson(reply.value));
+  } catch {
+    return abortEvent(input.todoist, task, "horário ilegível");
+  }
+
+  const resolved = resolveEventSlot(slot);
+  if (!resolved) {
+    return abortEvent(input.todoist, task, "horário ilegível");
+  }
+
+  const occurrences = expandOccurrences(resolved.range, resolved.recurrence);
+  const window = conflictWindow(resolved.range, resolved.recurrence !== null);
+  const existing = await input.calendar.listEvents({
+    date: window.from,
+    untilDate: window.until,
+    calendarId: input.calendarId,
+  });
+  if (!existing.ok) {
+    throw new Error(existing.error.message);
+  }
+
+  const conflict = findConflict(occurrences, existing.value);
+  if (conflict) {
+    return abortEvent(input.todoist, task, conflictComment(conflict));
+  }
+
+  const created = await input.calendar.upsertEvent({
+    eventId: null,
+    calendarId: input.calendarId,
+    summary: task.content,
+    range: resolved.range,
+    description: null,
+    recurrence: resolved.recurrence,
+  });
+  if (!created.ok) {
+    throw new Error(created.error.message);
+  }
+
+  await requireOk(input.todoist.completeTask(task.id));
+  return `${task.content} · ${resolved.range.start.iso}–${resolved.range.end.iso}`;
+}
+
+async function abortEvent(
+  todoist: TodoistPort,
+  task: TodoistTask,
+  reason: string,
+): Promise<string> {
+  await requireOk(
+    todoist.updateTask(task.id, {
+      labels: withPendingLabel(task.labels),
+    }),
+  );
+  await requireOk(todoist.addTaskComment(task.id, reason));
+  return `Pending: ${reason}`;
 }
 
 async function processNext(

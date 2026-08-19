@@ -1,11 +1,13 @@
 import { err, ok, type Result } from "../result.js";
 import type {
   IntegrationError,
+  TodoistFilter,
   TodoistLabel,
   TodoistProject,
 } from "../schemas.js";
 import type { TodoistPort } from "../../ports/TodoistPort.js";
 import {
+  FILTER_CATALOG,
   GTD_ARCHIVE,
   GTD_INCUBATE,
   GTD_NEXT_ACTIONS,
@@ -25,6 +27,7 @@ export type GtdTree = {
 export type GtdEnsureResult = {
   readonly tree: GtdTree;
   readonly labelsCreated: readonly string[];
+  readonly filtersCreated: readonly string[];
   readonly projectsCreated: readonly string[];
 };
 
@@ -32,6 +35,7 @@ export async function ensureGtd(
   todoist: TodoistPort,
 ): Promise<Result<GtdEnsureResult>> {
   const labelsCreated: string[] = [];
+  const filtersCreated: string[] = [];
   const projectsCreated: string[] = [];
 
   const labels = await todoist.listLabels();
@@ -51,6 +55,26 @@ export async function ensureGtd(
       return created;
     }
     labelsCreated.push(spec.name);
+  }
+
+  const filters = await todoist.listFilters();
+  if (!filters.ok) {
+    return filters;
+  }
+  const missingFilters = missingFilterNames(filters.value);
+  for (const spec of FILTER_CATALOG) {
+    if (!missingFilters.has(spec.name)) {
+      continue;
+    }
+    const created = await todoist.createFilter({
+      name: spec.name,
+      query: spec.query,
+      color: spec.color,
+    });
+    if (!created.ok) {
+      return created;
+    }
+    filtersCreated.push(spec.name);
   }
 
   const listed = await todoist.listProjects();
@@ -107,6 +131,7 @@ export async function ensureGtd(
   return ok({
     tree: tree.value,
     labelsCreated,
+    filtersCreated,
     projectsCreated,
   });
 }
@@ -117,6 +142,15 @@ function missingLabelNames(labels: readonly TodoistLabel[]): Set<string> {
   const present = new Set(labels.map((label) => label.name));
   return new Set(
     LABEL_CATALOG.filter((spec) => !present.has(spec.name)).map(
+      (spec) => spec.name,
+    ),
+  );
+}
+
+function missingFilterNames(filters: readonly TodoistFilter[]): Set<string> {
+  const present = new Set(filters.map((filter) => filter.name));
+  return new Set(
+    FILTER_CATALOG.filter((spec) => !present.has(spec.name)).map(
       (spec) => spec.name,
     ),
   );

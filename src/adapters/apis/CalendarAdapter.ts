@@ -11,6 +11,7 @@ import {
   TIME_ZONE,
   type CalendarEvent,
   type DeleteEventInput,
+  type EventRecurrence,
   type IntegrationConfig,
   type IntegrationError,
   type ListEventsQuery,
@@ -57,7 +58,12 @@ export class CalendarAdapter implements CalendarPort {
   ): Promise<Result<readonly CalendarEvent[]>> {
     const started = Date.now();
     try {
-      const items = await this.listDayEvents(query.calendarId, query.date);
+      const until = query.untilDate ?? query.date;
+      const items = await this.listRangeEvents(
+        query.calendarId,
+        query.date,
+        until,
+      );
       const events = items.flatMap((item) => {
         const mapped = this.toEvent(item, query.calendarId);
         return mapped ? [mapped] : [];
@@ -91,6 +97,9 @@ export class CalendarAdapter implements CalendarPort {
       };
       if (input.description !== null) {
         requestBody.description = input.description;
+      }
+      if (input.recurrence) {
+        requestBody.recurrence = [toRrule(input.recurrence)];
       }
 
       const eventId = input.eventId ?? undefined;
@@ -151,11 +160,13 @@ export class CalendarAdapter implements CalendarPort {
     }
   }
 
-  private async listDayEvents(
+  private async listRangeEvents(
     calendarId: string,
-    date: string,
+    fromDate: string,
+    untilDate: string,
   ): Promise<calendar_v3.Schema$Event[]> {
-    const { timeMin, timeMax } = civilDayBounds(date);
+    const { timeMin } = civilDayBounds(fromDate);
+    const { timeMax } = civilDayBounds(untilDate);
     const items: calendar_v3.Schema$Event[] = [];
     let pageToken: string | undefined;
     do {
@@ -194,6 +205,7 @@ export class CalendarAdapter implements CalendarPort {
       summary: event.summary ?? "",
       range,
       htmlLink: event.htmlLink ?? null,
+      allDay: Boolean(event.start?.date && !event.start.dateTime),
     });
   }
 
@@ -238,6 +250,20 @@ export class CalendarAdapter implements CalendarPort {
     });
     return err(error);
   }
+}
+
+function toRrule(recurrence: EventRecurrence): string {
+  const parts = [`FREQ=${recurrence.freq}`];
+  if (recurrence.interval > 1) {
+    parts.push(`INTERVAL=${recurrence.interval}`);
+  }
+  if (recurrence.freq === "WEEKLY" && recurrence.byDay.length > 0) {
+    parts.push(`BYDAY=${recurrence.byDay.join(",")}`);
+  }
+  if (recurrence.until) {
+    parts.push(`UNTIL=${recurrence.until.replaceAll("-", "")}`);
+  }
+  return `RRULE:${parts.join(";")}`;
 }
 
 function rangeOf(event: calendar_v3.Schema$Event): TimeRange | null {

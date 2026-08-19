@@ -3,11 +3,13 @@ import { test } from "node:test";
 
 import { ok, type Result } from "../result.js";
 import type {
+  CreateTodoistFilterInput,
   CreateTodoistLabelInput,
   CreateTodoistProjectInput,
   CreateTodoistTaskInput,
   IntegrationError,
   ListTasksQuery,
+  TodoistFilter,
   TodoistLabel,
   TodoistProject,
   TodoistTask,
@@ -17,7 +19,7 @@ import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { LABEL_CATALOG } from "./catalog.js";
 import { ensureGtd } from "./ensure.js";
 
-test("ensure cria pasta, listas, pilares e o catálogo de etiquetas inclusive Project", async () => {
+test("ensure cria pasta, listas, pilares, o catálogo de etiquetas e o filtro Pendentes", async () => {
   const todoist = new MemoryTodoist();
   const result = await ensureGtd(todoist);
   assert.equal(result.ok, true);
@@ -34,7 +36,10 @@ test("ensure cria pasta, listas, pilares e o catálogo de etiquetas inclusive Pr
   for (const spec of LABEL_CATALOG) {
     assert.ok(labelNames.includes(spec.name), `faltou ${spec.name}`);
   }
-  assert.ok(result.value.labelsCreated.includes("Project"));
+  assert.ok(result.value.labelsCreated.includes("Event"));
+  assert.ok(result.value.labelsCreated.includes("Pending"));
+  assert.deepEqual(result.value.filtersCreated, ["Pendentes"]);
+  assert.equal(todoist.filters[0]?.query, "@Pending");
 
   const again = await ensureGtd(todoist);
   assert.equal(again.ok, true);
@@ -42,6 +47,7 @@ test("ensure cria pasta, listas, pilares e o catálogo de etiquetas inclusive Pr
     return;
   }
   assert.deepEqual(again.value.labelsCreated, []);
+  assert.deepEqual(again.value.filtersCreated, []);
   assert.deepEqual(again.value.projectsCreated, []);
 });
 
@@ -55,6 +61,7 @@ class MemoryTodoist implements TodoistPort {
     },
   ];
   labels: TodoistLabel[] = [];
+  filters: TodoistFilter[] = [];
   private seq = 1;
 
   async listTasks(
@@ -69,6 +76,13 @@ class MemoryTodoist implements TodoistPort {
 
   async listTaskComments(_taskId: string): Promise<Result<readonly string[]>> {
     return ok([]);
+  }
+
+  async addTaskComment(
+    _taskId: string,
+    _content: string,
+  ): Promise<Result<void>> {
+    return ok(undefined);
   }
 
   async updateTask(
@@ -135,6 +149,23 @@ class MemoryTodoist implements TodoistPort {
     this.seq += 1;
     this.labels.push(label);
     return ok(label);
+  }
+
+  async listFilters(): Promise<Result<readonly TodoistFilter[]>> {
+    return ok(this.filters);
+  }
+
+  async createFilter(
+    input: CreateTodoistFilterInput,
+  ): Promise<Result<TodoistFilter>> {
+    const filter: TodoistFilter = {
+      id: `f${this.seq}`,
+      name: input.name,
+      query: input.query,
+    };
+    this.seq += 1;
+    this.filters.push(filter);
+    return ok(filter);
   }
 }
 

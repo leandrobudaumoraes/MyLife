@@ -30,12 +30,20 @@ export function civilNowIso(now: Date = new Date()): string {
 export function civilDayBounds(date: string): { timeMin: string; timeMax: string } {
   return {
     timeMin: `${date}T00:00:00-03:00`,
-    timeMax: `${nextCivilDate(date)}T00:00:00-03:00`,
+    timeMax: `${addCivilDays(date, 1)}T00:00:00-03:00`,
   };
 }
 
-function nextCivilDate(date: string): string {
+export function addCivilDays(date: string, days: number): string {
   const [year, month, day] = date.split("-").map(Number);
-  const next = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + 1));
+  const next = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, (day ?? 1) + days));
   return next.toISOString().slice(0, 10);
+}
+
+export function civilDateOfIso(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+export function addMinutesIso(iso: string, minutes: number): string {
+  return civilNowIso(new Date(Date.parse(iso) + minutes * 60_000));
 }

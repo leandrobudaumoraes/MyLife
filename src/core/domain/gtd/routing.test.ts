@@ -14,6 +14,10 @@ test("Project sozinho dispara o caminho de projeto", () => {
   assert.deepEqual(classifyRouting(["Project", "Casa"]), { kind: "Project" });
 });
 
+test("Event sozinho dispara o caminho de evento", () => {
+  assert.deepEqual(classifyRouting(["Event", "Casa"]), { kind: "Event" });
+});
+
 test("duas etiquetas de roteamento são ambíguas", () => {
   assert.deepEqual(classifyRouting(["Next", "Project"]), {
     kind: "skip",

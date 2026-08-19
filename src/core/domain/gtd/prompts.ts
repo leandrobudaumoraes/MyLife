@@ -69,3 +69,31 @@ export function projectPlanPrompt(input: {
     comments,
   ].join("\n");
 }
+
+export function eventSlotPrompt(input: {
+  readonly task: TodoistTask;
+  readonly comments: readonly string[];
+  readonly today: string;
+}): string {
+  const comments =
+    input.comments.length === 0
+      ? "(nenhum)"
+      : input.comments.map((comment) => `- ${comment}`).join("\n");
+
+  return [
+    "Esta captura da Inbox Todoist tem a etiqueta Event: vira UM compromisso no Google Calendar.",
+    "Não reescreva o título em GTD. Não invente dia, hora nem recorrência que o texto não peça.",
+    `Hoje (America/Sao_Paulo): ${input.today}.`,
+    "Responda só JSON:",
+    '{"insufficient":false,"start":"2026-08-20T10:00:00-03:00","end":"2026-08-20T11:00:00-03:00","recurrence":null}',
+    "start e end: ISO com fuso -03:00. Se só houver hora de início, end=null (o código põe 60 min).",
+    "recurrence: null se for avulso. Se o texto pedir série: {\"freq\":\"DAILY\"|\"WEEKLY\"|\"MONTHLY\",\"interval\":1,\"byDay\":[\"MO\"],\"until\":\"2026-09-03\" ou null}.",
+    "byDay só em WEEKLY (MO TU WE TH FR SA SU). until só se o texto disser até quando.",
+    "insufficient:true se faltar dia ou hora — aí start=null, end=null, recurrence=null. Não chute amanhã.",
+    "",
+    `Título: ${input.task.content}`,
+    `Descrição: ${input.task.description}`,
+    "Comentários:",
+    comments,
+  ].join("\n");
+}

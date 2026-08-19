@@ -1,9 +1,12 @@
 import "reflect-metadata";
 
+import { randomUUID } from "node:crypto";
+
 import {
   TodoistApi,
   TodoistArgumentError,
   TodoistRequestError,
+  createCommand,
   type ColorKey,
   type GetTasksArgs,
   type PersonalProject,
@@ -14,15 +17,18 @@ import { inject, injectable } from "inversify";
 
 import { err, ok, type Result } from "../../core/domain/result.js";
 import {
+  TodoistFilterSchema,
   TodoistLabelSchema,
   TodoistProjectSchema,
   TodoistTaskSchema,
+  type CreateTodoistFilterInput,
   type CreateTodoistLabelInput,
   type CreateTodoistProjectInput,
   type CreateTodoistTaskInput,
   type IntegrationConfig,
   type IntegrationError,
   type ListTasksQuery,
+  type TodoistFilter,
   type TodoistLabel,
   type TodoistProject,
   type TodoistTask,
@@ -217,6 +223,91 @@ export class TodoistAdapter implements TodoistPort {
     });
   }
 
+  async listFilters(): Promise<Result<readonly TodoistFilter[]>> {
+    const started = Date.now();
+    try {
+      const filters = await this.collectFilters();
+      console.log("[TodoistAdapter.listFilters]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        count: filters.length,
+      });
+      return ok(filters);
+    } catch (cause: unknown) {
+      return this.fail("listFilters", started, cause);
+    }
+  }
+
+  async createFilter(
+    input: CreateTodoistFilterInput,
+  ): Promise<Result<TodoistFilter>> {
+    return this.enqueueWrite(async () => {
+      const started = Date.now();
+      try {
+        await this.withRetry(() =>
+          this.client.sync({
+            commands: [
+              createCommand(
+                "filter_add",
+                {
+                  name: input.name,
+                  query: input.query,
+                  color: asColorKey(input.color),
+                  isFavorite: true,
+                },
+                randomUUID(),
+              ),
+            ],
+            resourceTypes: ["filters"],
+            syncToken: "*",
+          }),
+        );
+        const filters = await this.collectFilters();
+        const created = filters.find((filter) => filter.name === input.name);
+        if (!created) {
+          return err({
+            provider: "todoist",
+            code: "validation",
+            message: `Filtro ${input.name} não materializou depois do sync.`,
+            retryable: false,
+            retryAfterMs: null,
+            cause: null,
+          });
+        }
+        console.log("[TodoistAdapter.createFilter]", {
+          ok: true,
+          durationMs: Date.now() - started,
+          name: created.name,
+        });
+        return ok(created);
+      } catch (cause: unknown) {
+        return this.fail("createFilter", started, cause);
+      }
+    });
+  }
+
+  async addTaskComment(
+    taskId: string,
+    content: string,
+  ): Promise<Result<void>> {
+    return this.enqueueWrite(async () => {
+      const started = Date.now();
+      try {
+        await this.withRetry(() =>
+          this.client.addComment({ taskId, content }),
+        );
+        console.log("[TodoistAdapter.addTaskComment]", {
+          ok: true,
+          durationMs: Date.now() - started,
+          taskId,
+        });
+        return ok(undefined);
+      } catch (cause: unknown) {
+        return this.fail("addTaskComment", started, cause);
+      }
+    });
+  }
+
   async listTaskComments(taskId: string): Promise<Result<readonly string[]>> {
     const started = Date.now();
     try {
@@ -326,6 +417,23 @@ export class TodoistAdapter implements TodoistPort {
       cursor = page.nextCursor;
     } while (cursor);
     return results;
+  }
+
+  private async collectFilters(): Promise<TodoistFilter[]> {
+    const response = await this.withRetry(() =>
+      this.client.sync({
+        resourceTypes: ["filters"],
+        syncToken: "*",
+      }),
+    );
+    return (response.filters ?? []).flatMap((filter) => {
+      const parsed = TodoistFilterSchema.safeParse({
+        id: String(filter.id),
+        name: filter.name,
+        query: filter.query,
+      });
+      return parsed.success && filter.isDeleted !== true ? [parsed.data] : [];
+    });
   }
 
   private async collectTasks(args: GetTasksArgs = {}): Promise<Task[]> {
