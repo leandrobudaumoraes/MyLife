@@ -4,6 +4,6 @@ Contrato em construção. Código do domínio só entra quando a spec correspond
 
 | Spec | Status | Sobre |
 |---|---|---|
-| [01 — Fluxo Todoist](01-todoist-fluxo.md) | alinhada | Inbox → GTD; Encubar é projeto; conta antes do código |
+| [01 — Fluxo Todoist](01-todoist-fluxo.md) | alinhada | Ensure GTD na corrida; Inbox + `Next`/`Maybe`/`Archive` |
 
 Próximas (ainda sem arquivo): Calendar (relógio), Notion (plano), orquestração / grafo.

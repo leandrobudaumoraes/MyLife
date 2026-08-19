@@ -1,28 +1,13 @@
 # Spec 01 — Fluxo Todoist
 
-Status: **alinhada** (2026-08-18)  
-Código do processador: **depois** desta conta existir.
+Status: **alinhada** (2026-08-18) — 2ª modificação: bootstrap GTD na primeira corrida  
+Código do processador: quando as regras desta nota estiverem fechadas. A conta **não** precisa existir na mão.
 
-Captura humana = só a **Inbox do Todoist**.  
-O Life OS, ao rodar, **esvazia a Inbox** com GTD: esclarecer → organizar.  
+Captura humana = **Inbox nativa do Todoist** + **uma** etiqueta de roteamento.  
+Toda corrida começa **materializando o GTD** (idempotente). Depois, só processa o que já tem `Next`, `Maybe` ou `Archive`. O resto fica na Inbox.  
 **Não marca Hoje.** Engajar fica para o Watch ou spec futura.
 
-A conta Todoist é alinhada **antes** do código do processador. O processador **pode criar** projeto que ainda não existir.
-
-Conta alinhada em 2026-08-18. IDs atuais:
-
-| Projeto | ID | Papel |
-|---|---|---|
-| `🩺 Saúde` | `6fGcGJpmjQ49X54h` | Pilar (ex-Vitalidade) |
-| `👨 Família` | `6chHqrXV8FjJx259` | Pilar |
-| `🏠 Casa` | `6hHw9c6qpHQ9cJr2` | Pilar |
-| `💰 Financeiro` | `6hHw9c9559X6x2V8` | Pilar |
-| `🤝 Amizades` | `6hHw9cG32h8JxPP6` | Pilar |
-| `🕍 Instituto` | `6cfjmmqfhW4282hQ` | Pilar |
-| `🌙 Loja Lua Branca` | `6hHw9cMQM8qCCmvv` | Pilar |
-| `💤 Encubar` | `6XmPMFCJGMMQQ5x8` | Algum dia talvez (já existia) |
-
-`🏠 Lar` foi partido e apagado. Os sete pilares (exceto Encubar) ficam sob `📁 Projetos`.
+Contrato = **nomes canônicos** desta nota. IDs não entram no domínio: servem só de snapshot da conta atual (§8). A mesma spec sobe uma conta vazia ou a do Leandro.
 
 ---
 
@@ -30,39 +15,115 @@ Conta alinhada em 2026-08-18. IDs atuais:
 
 | Camada | Ferramenta | Entra |
 |---|---|---|
-| Captura | Todoist Inbox | Texto solto. Única porta de entrada. |
-| **Ação** | **Projetos dos sete pilares** | Próxima ação física, só se o pilar ainda comporta |
-| Algum dia | **Projeto `Encubar`** | Pertence à vida, mas não será pego ainda |
+| Captura | Inbox nativa do Todoist | Texto solto. Única porta de entrada. |
+| Roteamento | Etiquetas `Next` / `Maybe` / `Archive` | O humano escolhe o destino. |
+| **Ação** | **Projeto `⏩ Próximas ações`** | Próxima ação física, já filtrada |
+| Algum dia | **Projeto `💤 Encubar`** | Pertence à vida, mas não será pego ainda |
+| Referência | **Projeto `📌 Arquivar`** | Guardar, não fazer |
+| Projetos PARA | Pasta `📁 Projetos` + um projeto por pilar | Onde mora o trabalho de longo prazo. **Não** recebem item desta corrida da Inbox |
 | Relógio | Google Calendar | Contexto de leitura. Sem evento e sem due nesta corrida. |
 | Plano | Notion | Fora desta spec |
-| Porquê | Vault | Contexto que o LLM pode ler |
+| Porquê | Vault | Contexto que o LLM pode ler (só para `Next`) |
 
-O humano **só adiciona na Inbox**. Não escolhe projeto, etiqueta nem data.
+O humano **adiciona na Inbox** e **marca o destino** com uma etiqueta de roteamento. Não escolhe projeto nem data.
 
 TDAH: um inbox. Um destino por item. Sem explodir um texto em cinco tarefas.
 
 ---
 
-## 2. Conta
+## 2. Árvore GTD (norma desta spec)
 
-Oito projetos + Inbox nativa. Encubar **é projeto**, não lista e não seção.
+Listas GTD e projetos de verdade **não se misturam**. Inbox é a nativa — nunca um projeto chamado Inbox.
 
-| Projeto | Papel |
-|---|---|
-| `🩺 Saúde` | Pilar |
-| `👨 Família` | Pilar |
-| `🏠 Casa` | Pilar (manutenção, compras, carros) |
-| `💰 Financeiro` | Pilar (contas, dinheiro) |
-| `🤝 Amizades` | Pilar |
-| `🕍 Instituto` | Pilar |
-| `🌙 Loja Lua Branca` | Pilar |
-| `💤 Encubar` | **Não é pilar.** Parque de “algum dia talvez” |
+```
+Inbox                          ← nativa; não criar
+⏩ Próximas ações              ← lista GTD (raiz)
+💤 Encubar                     ← lista GTD (raiz) — algum dia / talvez
+📌 Arquivar                    ← lista GTD (raiz) — referência
+📁 Projetos                    ← pasta (projeto-pai)
+  🩺 Saúde
+  👨 Família
+  🏠 Casa
+  💰 Financeiro
+  🤝 Amizades
+  🕍 Instituto
+  🌙 Loja Lua Branca
+```
 
-**Não é pilar de tarefa:** Engenharia / PagBank. Item de trabalho na Inbox → apagar.
+| Nome canônico | Tipo | Papel |
+|---|---|---|
+| `⏩ Próximas ações` | projeto raiz | Destino de `Next` |
+| `💤 Encubar` | projeto raiz | Destino de `Maybe` |
+| `📌 Arquivar` | projeto raiz | Destino de `Archive` |
+| `📁 Projetos` | projeto raiz, pasta | Pai dos pilares |
+| `🩺 Saúde` | filho de `📁 Projetos` | Pilar |
+| `👨 Família` | filho de `📁 Projetos` | Pilar |
+| `🏠 Casa` | filho de `📁 Projetos` | Pilar |
+| `💰 Financeiro` | filho de `📁 Projetos` | Pilar |
+| `🤝 Amizades` | filho de `📁 Projetos` | Pilar |
+| `🕍 Instituto` | filho de `📁 Projetos` | Pilar |
+| `🌙 Loja Lua Branca` | filho de `📁 Projetos` | Pilar |
 
-TDAH não é pilar nem projeto.
+**Não criar nunca**
 
-Se na corrida faltar um projeto da tabela, o processador **cria** (nome + emoji acima). Não cria Engenharia. Não recria o pai `Leandro Budau Moraes`.
+- Outra Inbox
+- Lista `Aguardando` / Waiting — waiting-for vira próxima ação, não lista
+- Engenharia / PagBank
+- TDAH como projeto
+- O pai da conta (`Leandro Budau Moraes` ou equivalente)
+- Projeto por órgão, por cápsula, por tipo de oficina
+- Etiqueta com nome de pilar
+
+Projetos que o humano já tiver além desta árvore (ex.: `Normalizar o instituto`) **permanecem**. O ensure não apaga, não renomeia e não funde.
+
+### 2.1 Ensure (toda corrida, antes da Inbox)
+
+Idempotente. Resolve por **nome canônico exato** (emoji + texto). Sem match por ID.
+
+Ordem:
+
+1. Listar projetos e etiquetas da conta.
+2. Se faltar `📁 Projetos`, criar na raiz.
+3. Se faltar lista GTD da raiz (`⏩ Próximas ações`, `💤 Encubar`, `📌 Arquivar`), criar na raiz.
+4. Se faltar pilar, criar **já como filho** de `📁 Projetos`.
+5. Se faltar etiqueta do catálogo §2.2 ou §2.3, criar com o nome e a cor da tabela.
+
+Se o nome canônico já existe, **reusa** — mesmo que o pai seja outro. Não duplica. Não move. Não reparenta.
+
+Conta vazia + token válido → depois do ensure a árvore e as etiquetas desta nota existem. Nada na mão.
+
+### 2.2 Etiquetas de roteamento
+
+O ensure cria se faltarem. Nomes exatos, em inglês. Só estas três disparam o processador da Inbox.
+
+| Etiqueta | Cor | Destino |
+|---|---|---|
+| `Next` | `lime_green` | `⏩ Próximas ações` |
+| `Maybe` | `yellow` | `💤 Encubar` |
+| `Archive` | `grey` | `📌 Arquivar` |
+
+Depois de processar, **remove** a etiqueta de roteamento da tarefa. Ela não viaja com o item.
+
+Item na Inbox **sem** uma dessas três: **ignora**. Não move, não apaga, não reescreve.
+
+Item com **duas ou mais** etiquetas de roteamento: **ignora** (um destino só; o humano desambigua).
+
+### 2.3 Etiquetas de contexto
+
+O ensure cria se faltarem. Só este catálogo. Não inventa dimensão nova (Tempo fica de fora até a spec ganhar nomes).
+
+| Dimensão | Etiqueta | Cor |
+|---|---|---|
+| Localização | `Casa` | `salmon` |
+| Localização | `Rua` | `salmon` |
+| Localização | `Carro` | `salmon` |
+| Localização | `Celular` | `salmon` |
+| Energia | `Alta` | `grape` |
+| Energia | `Baixa` | `grape` |
+| Espaço | `Compra` | `grape` |
+| Tempo | — | ainda sem etiqueta |
+
+Só `Next` ganha contexto. `Maybe` e `Archive` **não** recebem etiqueta nova.
 
 ---
 
@@ -70,77 +131,76 @@ Se na corrida faltar um projeto da tabela, o processador **cria** (nome + emoji 
 
 ```mermaid
 flowchart TB
-  H["Humano joga na Inbox"] --> RUN["Life OS roda"]
-  RUN --> ENSURE["Garante os 8 projetos"]
-  ENSURE --> CTX["Lê Inbox + tarefas abertas de todos os projetos"]
-  CTX --> GTD["Esclarecer e reescrever título GTD"]
-  GTD --> Q1{"Pertence a um pilar?"}
-  Q1 -->|não| DEL["Apagar"]
-  Q1 -->|sim| Q2{"Acionável?"}
-  Q2 -->|referência| ARQ["Arquivar"]
-  Q2 -->|ainda não / sem compromisso| ENC["Mover para projeto Encubar"]
-  Q2 -->|sim| Q3{"O projeto do pilar comporta?"}
-  Q3 -->|sim| PROJ["Mover para o projeto do pilar"]
-  Q3 -->|carga alta| ENC2["Mover para projeto Encubar"]
+  H["Humano joga na Inbox e marca Next, Maybe ou Archive"] --> RUN["Life OS roda"]
+  RUN --> ENSURE["Ensure: árvore GTD + etiquetas"]
+  ENSURE --> INBOX["Lê só a Inbox"]
+  INBOX --> FILTRO{"Tem exatamente uma etiqueta de roteamento?"}
+  FILTRO -->|não| SKIP["Deixa na Inbox"]
+  FILTRO -->|Next| NEXT["Move para Próximas ações, tira Next, aplica contexto"]
+  FILTRO -->|Maybe| MAYBE["Move para Encubar, tira Maybe"]
+  FILTRO -->|Archive| ARQ["Move para Arquivar, tira Archive"]
 ```
 
-Um item da Inbox → **um** destino. O LLM **reescreve** o título (§3.3) antes de mover.
+Um item processado → **um** destino. Sem data. Sem Hoje.
 
-### 3.1 Esclarecer
+### 3.1 Filtrar
 
-Para cada item, nesta ordem:
+Para cada item da Inbox:
 
-1. O que é isto, em uma frase?
-2. Pertence a qual pilar da tabela — ou a nenhum?
-3. É acionável? Qual é a próxima ação física (GTD)?
-4. Um passo ou resultado com vários passos? (vários passos = um item no destino, **não** N cards)
-5. **Viabilidade:** ler **tudo** o que já está nos projetos dos pilares. Encubar conta como parque, não como carga de pilar.
+1. Contar etiquetas `Next`, `Maybe`, `Archive`.
+2. Zero ou mais de uma → pular.
+3. Uma → organizar (§3.2).
 
-Não inventa fato. Dúvida de viabilidade → Encubar, não chute para o pilar.
+Não lê carga dos pilares nesta fatia. O humano já filtrou o destino.
 
-### 3.2 Organizar (viabilidade)
+### 3.2 Organizar
 
-Fazer sentido ir para um pilar **não basta**. Só move para o projeto do pilar se, perante o que **já existe nesse pilar**, ainda é viável empenhar.
+| Etiqueta | Destino | Título | Contexto |
+|---|---|---|---|
+| `Next` | `⏩ Próximas ações` | Reescreve GTD (§3.3) | Remove `Next`. Aplica etiquetas do catálogo §2.3 |
+| `Maybe` | `💤 Encubar` | Não mexe | Remove `Maybe`. Não adiciona etiqueta |
+| `Archive` | `📌 Arquivar` | Não mexe | Remove `Archive`. Não adiciona etiqueta |
 
-Sinais de “não comporta” (perceptível, sem número mágico):
+`💤 Encubar` guarda o que **não será pego ainda**, porém algum dia talvez.
 
-- O projeto do pilar já tem várias próximas ações abertas.
-- Já existe item equivalente.
-- O pilar já tem trabalho a meio e somar mais um dilui o foco.
-- Carga **geral** dos sete pilares alta — vale inclusive para Amizades.
-- Instituto: já há a entrega da semana. Loja: já há o item da quinta.
+Não marcar due. Não promover a Hoje. Item no destino fica **sem data**.
 
-| Decisão | Destino |
-|---|---|
-| Nenhum pilar, ruído, PagBank | **Apagar** |
-| Pilar, não acionável, referência | `📌 Arquivar` (lista, se existir) |
-| Pilar, “algum dia talvez”, sem pegar agora | Projeto `💤 Encubar` |
-| Pilar + acionável + **pilar não comporta** | Projeto `💤 Encubar` |
-| Pilar + acionável + **pilar comporta** | Projeto do pilar, título reescrito |
+### 3.3 `Next`: título GTD + contexto
 
-`💤 Encubar` é o projeto onde ficam tarefas que **não serão pegas ainda**, porém algum dia talvez. Não é seção dentro do pilar. Não é lista GTD.
+Só neste destino o LLM mexe no conteúdo.
 
-Não marcar due. Não promover a Hoje. Item no pilar ou no Encubar fica **sem data**.
-
-### 3.3 Reescrita GTD do título
-
-O texto cru da Inbox não viaja. O LLM reescreve **o mesmo item**:
+**Título** — o texto cru da Inbox não viaja. O mesmo item é reescrito:
 
 - Verbo no infinitivo + objeto concreto: o que o corpo faz e quando está **feito**.
 - Visível e completable numa sessão (`Ligar para Maria Nilda perguntar avaliação TDAH`, não `Família` nem `Melhorar o instituto`).
 - Uma ação. Sem lista, sem 90/5, sem cápsula, sem “organizar a oficina”.
 - Resultado vago → só a **primeira** ação física; o resto não vira card.
-- Etiqueta, se óbvia, é contexto (`Casa` `Rua` `Celular` `Compra`), nunca o nome do pilar.
+
+**Contexto** — escolhe **entre o catálogo §2.3** (já garantido pelo ensure):
+
+- Localização: no máximo uma de `Casa` `Rua` `Carro` `Celular`, se óbvio.
+- Energia: no máximo uma de `Alta` `Baixa`, se óbvio.
+- Espaço: `Compra` só se for compra.
+- Tempo: não aplica enquanto a spec não nomear etiquetas nessa dimensão.
+
+Não inventa etiqueta fora do catálogo. Dúvida → não põe aquela dimensão. Nunca etiqueta com nome de pilar.
+
+Etiquetas de contexto que o humano já tiver na tarefa **permanecem**, salvo a de roteamento.
 
 ### 3.4 O que o processador não faz
 
-- Criar um segundo *item* a partir de um da Inbox (projeto faltando, sim; tarefa extra, não)
+- Processar item sem `Next` / `Maybe` / `Archive`
+- Mover para projeto de pilar
+- Criar um segundo *item* a partir de um da Inbox (estrutura GTD faltando, o ensure cria; tarefa extra, não)
+- Criar etiqueta ou projeto fora das tabelas §2 / §2.2 / §2.3
 - Completar tarefa
 - Criar evento no Calendar
 - Marcar Hoje / `due`
 - Etiquetar por pilar
 - Aplicar regra dos 2 minutos
 - Partir um item em N tarefas
+- Aplicar contexto em `Maybe` ou `Archive`
+- Apagar, fundir ou reparentar projeto que já exista
 
 ---
 
@@ -154,14 +214,15 @@ O texto cru da Inbox não viaja. O LLM reescreve **o mesmo item**:
 
 | Método | Uso |
 |---|---|
-| `listTasks` (Inbox + por projeto) | Captura e carga |
-| `listProjects` | Resolver / detectar falta |
-| `createProject` | Criar pilar ou Encubar se não existir |
-| mover / atualizar conteúdo / apagar | Organizar |
+| `listProjects` | Ensure: detectar falta |
+| `createProject` | Ensure: criar lista GTD, pasta `📁 Projetos` ou pilar |
+| listar / criar etiqueta | Ensure: catálogo §2.2 e §2.3 |
+| `listTasks` (Inbox) | Captura filtrada |
+| mover / atualizar conteúdo e etiquetas | Organizar |
 | `updateTaskDue` | **Não chama** |
 | `completeTask` | **Não chama** |
 
-O domínio não importa o SDK. Testes mockam a porta.
+O domínio não importa o SDK. Testes mockam a porta. Nomes canônicos vivem no domínio; o adaptador só traduz.
 
 ---
 
@@ -173,16 +234,32 @@ O Second Brain ainda tem seis pilares, outros nomes, sem Amizades / Financeiro. 
 
 ## 7. Fechado
 
-1. Viabilidade olha a carga dos **projetos dos pilares**. Não comporta → Encubar, não forçar o pilar.
-2. Esta corrida **não** marca Hoje.
-3. Amizades entra, mesma régua de carga.
-4. LLM **reescreve** o título (§3.3).
-5. Conta alinhada **antes** do código do processador: Saúde, Casa, Financeiro, Encubar, etc.
-6. Processador **pode criar** projeto da tabela se faltar.
-7. Encubar é **projeto**, não lista e não seção. Guarda o que não será pego ainda, algum dia talvez.
+1. Nenhuma pasta nem etiqueta desta spec se cria na mão. O ensure da corrida materializa a árvore GTD e o catálogo.
+2. A spec é portátil: outra conta Todoist + o mesmo token no `.env` chega no mesmo GTD, pelos nomes, não pelos IDs.
+3. O humano escolhe o destino com `Next` / `Maybe` / `Archive`. O processador não classifica destino.
+4. Sem uma dessas etiquetas (ou com mais de uma) → a tarefa **fica** na Inbox.
+5. `Next` → `⏩ Próximas ações`; tira `Next`; reescreve título; aplica contexto do catálogo.
+6. `Maybe` → `💤 Encubar`; tira `Maybe`; não adiciona etiqueta.
+7. `Archive` → `📌 Arquivar`; tira `Archive`; não adiciona etiqueta.
+8. Esta corrida **não** marca Hoje e **não** move para pilar.
+9. Sem lista Aguardando. Sem Engenharia. Ensure não apaga o que já existe.
 
-## 8. Preparação da conta
+Próximas modificações ficam de fora desta nota até o Leandro pedir.
 
-Feito em 2026-08-18: Saúde, Casa, Financeiro, Amizades, Loja Lua Branca, Encubar (já existia). `Lar` partido e removido.
+## 8. Snapshot desta conta (não é contrato)
 
-O processador ainda pode **criar** qualquer projeto da tabela se faltar numa corrida futura.
+Leandro, 2026-08-18. Só documentação. O código resolve por nome.
+
+| Nome | ID |
+|---|---|
+| `⏩ Próximas ações` | `6XmPM78GWhvFG8rX` |
+| `💤 Encubar` | `6XmPMFCJGMMQQ5x8` |
+| `📌 Arquivar` | `6XmPMGxcjrRp8CWc` |
+| `📁 Projetos` | `6hHPV4W46wGrgWVW` |
+| `🩺 Saúde` | `6fGcGJpmjQ49X54h` |
+| `👨 Família` | `6chHqrXV8FjJx259` |
+| `🏠 Casa` | `6hHw9c6qpHQ9cJr2` |
+| `💰 Financeiro` | `6hHw9c9559X6x2V8` |
+| `🤝 Amizades` | `6hHw9cG32h8JxPP6` |
+| `🕍 Instituto` | `6cfjmmqfhW4282hQ` |
+| `🌙 Loja Lua Branca` | `6hHw9cMQM8qCCmvv` |
