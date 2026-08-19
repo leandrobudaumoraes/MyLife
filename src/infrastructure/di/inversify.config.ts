@@ -2,19 +2,19 @@ import "reflect-metadata";
 
 import { Container } from "inversify";
 
-import { MasterAgent } from "../../core/domain/orchestrator/MasterAgent.js";
-import { InMemoryProtectedSeriesCatalog } from "../../core/domain/protected-series.js";
+import { LifeOs } from "../../core/domain/orchestrator/LifeOs.js";
 import {
   IntegrationConfigSchema,
   type IntegrationConfig,
 } from "../../core/domain/schemas.js";
-import type { ProtectedSeriesCatalog } from "../../core/domain/catalog.js";
 import type { CalendarPort } from "../../core/ports/CalendarPort.js";
+import type { LlmPort } from "../../core/ports/LlmPort.js";
 import type { NotionPort } from "../../core/ports/NotionPort.js";
 import type { TodoistPort } from "../../core/ports/TodoistPort.js";
 import { TOKENS } from "../../core/ports/tokens.js";
 import { CalendarAdapter } from "../../adapters/apis/CalendarAdapter.js";
 import { NotionAdapter } from "../../adapters/apis/NotionAdapter.js";
+import { OpenAiAdapter } from "../../adapters/apis/OpenAiAdapter.js";
 import { TodoistAdapter } from "../../adapters/apis/TodoistAdapter.js";
 
 export function loadIntegrationConfig(
@@ -35,17 +35,11 @@ export function createContainer(
   const container = new Container({ defaultScope: "Singleton" });
 
   container.bind<IntegrationConfig>(TOKENS.Config).toConstantValue(config);
-
-  container
-    .bind<ProtectedSeriesCatalog>(TOKENS.ProtectedSeries)
-    .toConstantValue(new InMemoryProtectedSeriesCatalog());
-
   container.bind<TodoistPort>(TOKENS.Todoist).to(TodoistAdapter);
   container.bind<NotionPort>(TOKENS.Notion).to(NotionAdapter);
-  container
-    .bind<CalendarPort>(TOKENS.GoogleCalendar)
-    .to(CalendarAdapter);
-  container.bind(MasterAgent).toSelf();
+  container.bind<CalendarPort>(TOKENS.GoogleCalendar).to(CalendarAdapter);
+  container.bind<LlmPort>(TOKENS.Llm).to(OpenAiAdapter);
+  container.bind(LifeOs).toSelf();
 
   return container;
 }

@@ -5,3 +5,4 @@ export type {
   CalendarPort,
   IGoogleCalendarPort,
 } from "./CalendarPort.js";
+export type { LlmPort, ILlmPort } from "./LlmPort.js";

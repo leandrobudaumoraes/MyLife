@@ -4,6 +4,5 @@ export const TOKENS = {
   Notion: Symbol.for("INotionPort"),
   GoogleCalendar: Symbol.for("IGoogleCalendarPort"),
   Llm: Symbol.for("ILlmPort"),
-  ProtectedSeries: Symbol.for("ProtectedSeriesCatalog"),
   Config: Symbol.for("IntegrationConfig"),
 } as const;
