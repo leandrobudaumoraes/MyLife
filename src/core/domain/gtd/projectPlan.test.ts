@@ -5,6 +5,8 @@ import {
   forceSingleDoing,
   isUsableProjectPlan,
   limitPlannedTasks,
+  normalizeProjectSelect,
+  ProjectPlanSchema,
 } from "./projectPlan.js";
 
 test("força exatamente uma DOING", () => {
@@ -39,10 +41,33 @@ test("nome reservado não é plano usável", () => {
     isUsableProjectPlan({
       insufficient: false,
       projectName: "🩺 Saúde",
-      select: null,
+      select: "Pessoal",
       doingLabels: [],
       tasks: [{ title: "Ligar", column: "DOING" }],
     }),
     false,
   );
+});
+
+test("select nulo ou omitido vira Pessoal", () => {
+  assert.equal(normalizeProjectSelect(null), "Pessoal");
+  assert.equal(normalizeProjectSelect(undefined), "Pessoal");
+  assert.equal(
+    ProjectPlanSchema.parse({
+      insufficient: false,
+      projectName: "Curso de IA",
+      select: null,
+      tasks: [{ title: "Listar módulos", column: "DOING" }],
+    }).select,
+    "Pessoal",
+  );
+});
+
+test("select aceita alias de pilar e acento", () => {
+  assert.equal(normalizeProjectSelect("Família"), "Familia");
+  assert.equal(normalizeProjectSelect("👨 Família"), "Familia");
+  assert.equal(normalizeProjectSelect("🌙 Loja Lua Branca"), "Loja");
+  assert.equal(normalizeProjectSelect("💰 Financeiro"), "Casa");
+  assert.equal(normalizeProjectSelect("Instituto Metatron"), "Instituto");
+  assert.equal(normalizeProjectSelect("Engenharia e IA"), "Pessoal");
 });

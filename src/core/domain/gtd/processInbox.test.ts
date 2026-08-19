@@ -73,6 +73,34 @@ test("item Project vira projeto PARA, DOING no Todoist e kanban no Notion", asyn
   assert.equal(todoist.tasks.filter((item) => item.projectId === para?.id).length, 2);
   assert.equal(notion.pages.length, 1);
   assert.equal(notion.cards.length, 2);
+  assert.equal(notion.lastSelect, "Instituto");
+});
+
+test("Project com select nulo no LLM grava Pessoal no Notion", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-ia",
+      content: "criar estrutura do curso de IA",
+      labels: ["Project"],
+    }),
+  ]);
+  const notion = new MemoryNotion();
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([
+      JSON.stringify({
+        insufficient: false,
+        projectName: "Criar estrutura do curso de IA",
+        select: null,
+        doingLabels: ["Casa"],
+        tasks: [{ title: "Listar os módulos do curso", column: "DOING" }],
+      }),
+    ]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(notion.lastSelect, "Pessoal");
 });
 
 test("Next move para Próximas ações e tira a etiqueta de roteamento", async () => {
@@ -135,6 +163,7 @@ class ScriptedLlm implements LlmPort {
 class MemoryNotion implements NotionPort {
   pages: NotionPage[] = [];
   cards: Array<{ title: string; column: string }> = [];
+  lastSelect: UpsertProjectPageInput["select"] = null;
 
   async listDatabasePages(): Promise<Result<readonly NotionPage[]>> {
     return ok(this.pages);
@@ -154,6 +183,7 @@ class MemoryNotion implements NotionPort {
   async upsertProjectPage(
     input: UpsertProjectPageInput,
   ): Promise<Result<NotionPage>> {
+    this.lastSelect = input.select;
     const page: NotionPage = {
       pageId: "np1",
       title: input.title,

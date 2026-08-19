@@ -295,7 +295,7 @@ Uma linha no banco `Projects`:
 |---|---|
 | `Nome do Projeto` | O mesmo nome PARA da §3.5.2 |
 | `Status` | `Em andamento` (há uma DOING) |
-| `Selecionar` | Um de `Pessoal` `Familia` `Loja` `Casa` `Instituto`, se óbvio. Senão, omite. Não cria opção nova |
+| `Selecionar` | Sempre um de `Pessoal` `Familia` `Loja` `Casa` `Instituto`. Na dúvida, `Pessoal`. Não cria opção nova |
 
 Mapa quando o conteúdo aponta para um pilar Todoist:
 
@@ -305,7 +305,7 @@ Mapa quando o conteúdo aponta para um pilar Todoist:
 | Casa / financeiro do lar | `Casa` |
 | Instituto | `Instituto` |
 | Loja Lua Branca | `Loja` |
-| Saúde, amizades, ou dúvida | `Pessoal` |
+| Saúde, amizades, Engenharia/IA/carreira, ou dúvida | `Pessoal` |
 
 Linha com o mesmo `Nome do Projeto` já existente → **reusa**. Não duplica.
 
