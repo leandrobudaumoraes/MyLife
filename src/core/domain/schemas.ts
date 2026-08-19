@@ -162,6 +162,7 @@ export const NotionPageSchema = z.object({
   pageId: z.string(),
   title: z.string(),
   url: z.string(),
+  status: z.string().nullable(),
 });
 export type NotionPage = z.infer<typeof NotionPageSchema>;
 

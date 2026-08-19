@@ -4,10 +4,17 @@ import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { ok, type Result } from "../result.js";
 import type {
   AdvancedDoingItem,
+  NotionPage,
+  ProjectTaskBoard,
   ProjectTaskCard,
   TodoistProject,
+  TodoistTask,
 } from "../schemas.js";
-import { isReservedProjectName } from "./catalog.js";
+import {
+  isNotionProjectInProgress,
+  isReservedProjectName,
+  STATE_LABEL_DOING,
+} from "./catalog.js";
 import type { GtdTree } from "./ensure.js";
 import { extractJson } from "./json.js";
 import { mergeContextLabels, withDoingLabel } from "./labels.js";
@@ -65,6 +72,20 @@ export async function advanceIdleProjects(input: {
         page.title,
         input.tree.projectsFolderId,
       );
+
+      if (!isNotionProjectInProgress(page.status)) {
+        const paused = await handlePausedProject({
+          todoist: input.todoist,
+          notion: input.notion,
+          page,
+          board: board.value,
+          existing,
+        });
+        if (!paused.ok) {
+          errors.push(`${page.title}: ${paused.error}`);
+        }
+        continue;
+      }
 
       if (existing) {
         const open = await listOpenTasks(input.todoist, existing.id);
@@ -145,6 +166,35 @@ function pickCardToMirror(
   return doing[0] ?? pickNextDoing(tasks);
 }
 
+async function handlePausedProject(input: {
+  readonly todoist: TodoistPort;
+  readonly notion: NotionPort;
+  readonly page: NotionPage;
+  readonly board: ProjectTaskBoard;
+  readonly existing: TodoistProject | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.existing) {
+    return { ok: true };
+  }
+
+  const open = await listOpenTasks(input.todoist, input.existing.id);
+  if (open.length === 0) {
+    return closeDoingCards(input.notion, input.board.tasks);
+  }
+
+  const hasDoing = open.some((task) =>
+    task.labels.includes(STATE_LABEL_DOING),
+  );
+  if (hasDoing && doingCardsOf(input.board.tasks).length === 0) {
+    const resumed = await input.notion.markProjectInProgress(input.page.pageId);
+    if (!resumed.ok) {
+      return { ok: false, error: resumed.error.message };
+    }
+  }
+
+  return { ok: true };
+}
+
 async function closeDoingCards(
   notion: NotionPort,
   tasks: readonly ProjectTaskCard[],
@@ -164,7 +214,7 @@ async function closeDoingCards(
 async function listOpenTasks(
   todoist: TodoistPort,
   projectId: string,
-): Promise<readonly { id: string }[]> {
+): Promise<readonly TodoistTask[]> {
   const tasks = await todoist.listTasks({ projectId });
   if (!tasks.ok) {
     throw new Error(tasks.error.message);

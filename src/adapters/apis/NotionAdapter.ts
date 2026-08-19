@@ -16,6 +16,7 @@ import {
 import { inject, injectable } from "inversify";
 
 import { err, ok, type Result } from "../../core/domain/result.js";
+import { NOTION_PROJECT_STATUS_IN_PROGRESS } from "../../core/domain/gtd/catalog.js";
 import {
   KanbanColumnSchema,
   NotionPageSchema,
@@ -127,6 +128,7 @@ export class NotionAdapter implements NotionPort {
           pageId,
           title: input.title,
           url,
+          status: null,
         }),
       );
     } catch (cause: unknown) {
@@ -145,7 +147,7 @@ export class NotionAdapter implements NotionPort {
       }
       const existing = pages.value.find((page) => page.title === input.title);
       const pageId = existing
-        ? await this.markProjectInProgress(existing.pageId, input.select)
+        ? await this.writeProjectInProgress(existing.pageId, input.select)
         : await this.createProjectPage(input);
       const page = await this.getPage(pageId);
       if (!page.ok) {
@@ -290,6 +292,25 @@ export class NotionAdapter implements NotionPort {
     }
   }
 
+  async markProjectInProgress(pageId: string): Promise<Result<NotionPage>> {
+    const started = Date.now();
+    try {
+      await this.writeProjectInProgress(pageId, null);
+      const page = await this.getPage(pageId);
+      if (!page.ok) {
+        return page;
+      }
+      console.log("[NotionAdapter.markProjectInProgress]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        pageId,
+      });
+      return page;
+    } catch (cause: unknown) {
+      return this.fail("markProjectInProgress", started, cause);
+    }
+  }
+
   private async createProjectPage(
     input: UpsertProjectPageInput,
   ): Promise<string> {
@@ -303,7 +324,7 @@ export class NotionAdapter implements NotionPort {
       "Nome do Projeto": {
         title: [{ type: "text", text: { content: input.title } }],
       },
-      Status: { status: { name: "Em andamento" } },
+      Status: { status: { name: NOTION_PROJECT_STATUS_IN_PROGRESS } },
     };
     if (input.select) {
       properties.Selecionar = { select: { name: input.select } };
@@ -315,7 +336,7 @@ export class NotionAdapter implements NotionPort {
     return created.id;
   }
 
-  private async markProjectInProgress(
+  private async writeProjectInProgress(
     pageId: string,
     select: UpsertProjectPageInput["select"],
   ): Promise<string> {
@@ -323,7 +344,7 @@ export class NotionAdapter implements NotionPort {
       string,
       { status: { name: string } } | { select: { name: string } }
     > = {
-      Status: { status: { name: "Em andamento" } },
+      Status: { status: { name: NOTION_PROJECT_STATUS_IN_PROGRESS } },
     };
     if (select) {
       properties.Selecionar = { select: { name: select } };
@@ -570,7 +591,16 @@ function toPage(page: PageObjectResponse): NotionPage {
     pageId: page.id,
     title: readAnyTitle(page),
     url: page.url,
+    status: readProjectStatus(page),
   });
+}
+
+function readProjectStatus(page: PageObjectResponse): string | null {
+  const property = page.properties.Status;
+  if (!property || property.type !== "status") {
+    return null;
+  }
+  return property.status?.name ?? null;
 }
 
 function readAnyTitle(page: PageObjectResponse): string {

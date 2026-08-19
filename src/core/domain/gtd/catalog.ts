@@ -32,6 +32,12 @@ export type RoutingLabel = (typeof ROUTING_LABELS)[number];
 
 export const STATE_LABEL_DOING = "Doing" as const;
 
+export const NOTION_PROJECT_STATUS_IN_PROGRESS = "Em andamento" as const;
+
+export function isNotionProjectInProgress(status: string | null): boolean {
+  return status === NOTION_PROJECT_STATUS_IN_PROGRESS;
+}
+
 export const CONTEXT_LOCATIONS = [
   "Casa",
   "Rua",

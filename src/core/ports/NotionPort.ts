@@ -18,6 +18,7 @@ export interface NotionPort {
   upsertProjectPage(
     input: UpsertProjectPageInput,
   ): Promise<Result<NotionPage>>;
+  markProjectInProgress(pageId: string): Promise<Result<NotionPage>>;
   ensureProjectTaskBoard(pageId: string): Promise<Result<ProjectTaskBoard>>;
   findProjectTaskBoard(
     pageId: string,

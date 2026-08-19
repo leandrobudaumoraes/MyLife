@@ -418,6 +418,7 @@ test("página Notion sem kanban Tarefas não cria DOING", async () => {
     pageId: "np-solta",
     title: "Ideia sem quadro",
     url: "https://notion.so/np-solta",
+    status: "Em andamento",
   });
   const result = await processInbox({
     todoist,
@@ -562,6 +563,170 @@ test("PARA vazio só com DOING no Notion marca DONE e não inventa carta", async
   assert.equal(todoist.tasks.length, 0);
 });
 
+test("projeto pausado no Notion não promove mesmo com PARA vazio", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard(
+    "np-curso",
+    "Montar o curso",
+    [
+      { title: "Listar os módulos", column: "DOING" },
+      { title: "Escrever a primeira aula", column: "TO DO" },
+    ],
+    "Pausado",
+  );
+
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 0);
+  assert.equal(
+    notion.cards.find((card) => card.title === "Listar os módulos")?.column,
+    "DONE",
+  );
+  assert.equal(
+    notion.cards.find((card) => card.title === "Escrever a primeira aula")
+      ?.column,
+    "TO DO",
+  );
+  assert.equal(todoist.tasks.length, 0);
+  assert.equal(notion.pageStatus("np-curso"), "Pausado");
+});
+
+test("projeto não iniciado sem PARA não cria projeto no Todoist", async () => {
+  const todoist = new MemoryTodoist([]);
+  const notion = new MemoryNotion();
+  notion.seedBoard(
+    "np-curso",
+    "Montar o curso",
+    [{ title: "Escrever a primeira aula", column: "TO DO" }],
+    "Não iniciada",
+  );
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 0);
+  assert.equal(
+    todoist.projects.some((project) => project.name === "Montar o curso"),
+    false,
+  );
+  assert.equal(todoist.tasks.length, 0);
+});
+
+test("Doing leftover em projeto pausado não retoma", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  todoist.tasks.push({
+    ...task({
+      id: "doing-1",
+      content: "Listar os módulos",
+      labels: ["Doing"],
+    }),
+    projectId: "para-curso",
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard(
+    "np-curso",
+    "Montar o curso",
+    [
+      { title: "Listar os módulos", column: "DOING" },
+      { title: "Escrever a primeira aula", column: "TO DO" },
+    ],
+    "Pausado",
+  );
+
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 0);
+  assert.equal(notion.pageStatus("np-curso"), "Pausado");
+  assert.equal(
+    notion.cards.find((card) => card.title === "Escrever a primeira aula")
+      ?.column,
+    "TO DO",
+  );
+  assert.equal(todoist.tasks.length, 1);
+});
+
+test("Doing no Todoist retoma projeto pausado sem DOING no Notion", async () => {
+  const todoist = new MemoryTodoist([]);
+  todoist.projects.push({
+    id: "para-curso",
+    name: "Montar o curso",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  todoist.tasks.push({
+    ...task({
+      id: "doing-2",
+      content: "Escrever a primeira aula",
+      labels: ["Doing"],
+    }),
+    projectId: "para-curso",
+  });
+  const notion = new MemoryNotion();
+  notion.seedBoard(
+    "np-curso",
+    "Montar o curso",
+    [
+      { title: "Listar os módulos", column: "DONE" },
+      { title: "Escrever a primeira aula", column: "TO DO" },
+    ],
+    "Pausado",
+  );
+
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([]),
+    tree,
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(result.value.advanced.length, 0);
+  assert.equal(notion.pageStatus("np-curso"), "Em andamento");
+  assert.equal(
+    notion.cards.find((card) => card.title === "Escrever a primeira aula")
+      ?.column,
+    "TO DO",
+  );
+  assert.equal(todoist.tasks.length, 1);
+});
+
 function task(input: {
   readonly id: string;
   readonly content: string;
@@ -603,15 +768,21 @@ class MemoryNotion implements NotionPort {
     return [...this.boards.values()].flatMap((board) => board.cards);
   }
 
+  pageStatus(pageId: string): string | null {
+    return this.pages.find((page) => page.pageId === pageId)?.status ?? null;
+  }
+
   seedBoard(
     pageId: string,
     title: string,
     cards: Array<{ title: string; column: KanbanColumn }>,
+    status: string | null = "Em andamento",
   ): void {
     this.pages.push({
       pageId,
       title,
       url: `https://notion.so/${pageId}`,
+      status,
     });
     this.boards.set(pageId, {
       dataSourceId: `ds-${pageId}`,
@@ -650,10 +821,28 @@ class MemoryNotion implements NotionPort {
       pageId: `np${this.seq}`,
       title: input.title,
       url: `https://notion.so/np${this.seq}`,
+      status: "Em andamento",
     };
     this.seq += 1;
     this.pages.push(page);
     return ok(page);
+  }
+
+  async markProjectInProgress(pageId: string): Promise<Result<NotionPage>> {
+    const page = this.pages.find((item) => item.pageId === pageId);
+    if (!page) {
+      return ok({
+        pageId,
+        title: "",
+        url: `https://notion.so/${pageId}`,
+        status: "Em andamento",
+      });
+    }
+    const updated: NotionPage = { ...page, status: "Em andamento" };
+    this.pages = this.pages.map((item) =>
+      item.pageId === pageId ? updated : item,
+    );
+    return ok(updated);
   }
 
   async ensureProjectTaskBoard(
@@ -684,6 +873,7 @@ class MemoryNotion implements NotionPort {
         pageId: "missing",
         title: input.title,
         url: "https://notion.so/missing",
+        status: null,
       });
     }
     const card: ProjectTaskCard = {
@@ -697,6 +887,7 @@ class MemoryNotion implements NotionPort {
       pageId: card.pageId,
       title: card.title,
       url: `https://notion.so/${card.pageId}`,
+      status: null,
     });
   }
 
@@ -713,12 +904,14 @@ class MemoryNotion implements NotionPort {
         pageId: card.pageId,
         title: card.title,
         url: `https://notion.so/${card.pageId}`,
+        status: null,
       });
     }
     return ok({
       pageId: input.pageId,
       title: "",
       url: `https://notion.so/${input.pageId}`,
+      status: null,
     });
   }
 
@@ -867,5 +1060,5 @@ class MemoryTodoist implements TodoistPort {
 }
 
 function emptyPage(): NotionPage {
-  return { pageId: "x", title: "", url: "https://notion.so/x" };
+  return { pageId: "x", title: "", url: "https://notion.so/x", status: null };
 }
