@@ -18,6 +18,7 @@ import { inject, injectable } from "inversify";
 import { err, ok, type Result } from "../../core/domain/result.js";
 import {
   NOTION_EVENTS_DB_TITLE,
+  NOTION_EVENTS_DB_TITLE_LEGACY,
   NOTION_PROJECT_STATUS_IN_PROGRESS,
   NOTION_PROJECT_STATUS_NOT_STARTED,
 } from "../../core/domain/gtd/catalog.js";
@@ -267,8 +268,10 @@ export class NotionAdapter implements NotionPort {
     const started = Date.now();
     try {
       const databaseId =
-        (await this.findChildDatabaseId(pageId, NOTION_EVENTS_DB_TITLE)) ??
-        (await this.createEventsDatabase(pageId));
+        (await this.findChildDatabaseId(pageId, [
+          NOTION_EVENTS_DB_TITLE,
+          NOTION_EVENTS_DB_TITLE_LEGACY,
+        ])) ?? (await this.createEventsDatabase(pageId));
       const dataSourceId = await this.dataSourceIdOf(databaseId);
       const events = await this.listDataSourceEvents(dataSourceId);
       console.log("[NotionAdapter.ensureProjectEventBoard]", {
@@ -291,7 +294,7 @@ export class NotionAdapter implements NotionPort {
         data_source_id: input.dataSourceId,
       });
       if (!isFullDataSource(dataSource)) {
-        throw new Error("Data source de Eventos incompleto");
+        throw new Error("Data source de Histórico de eventos incompleto");
       }
       const titleName = titlePropertyName(dataSource.properties);
       const dateName = datePropertyName(dataSource.properties);
@@ -439,8 +442,9 @@ export class NotionAdapter implements NotionPort {
 
   private async findChildDatabaseId(
     pageId: string,
-    title: string,
+    title: string | readonly string[],
   ): Promise<string | null> {
+    const titles = typeof title === "string" ? [title] : [...title];
     const blocks = await collectPaginatedAPI(this.client.blocks.children.list, {
       block_id: pageId,
     });
@@ -449,7 +453,7 @@ export class NotionAdapter implements NotionPort {
       if (!isFullBlock(block) || block.type !== "child_database") {
         continue;
       }
-      if (block.child_database.title === title) {
+      if (titles.includes(block.child_database.title)) {
         return block.id;
       }
       if (block.child_database.title.length === 0) {
@@ -463,7 +467,7 @@ export class NotionAdapter implements NotionPort {
       const retrievedTitle = isFullDatabase(database)
         ? database.title.map((item) => item.plain_text).join("")
         : "";
-      if (retrievedTitle === title) {
+      if (titles.includes(retrievedTitle)) {
         return databaseId;
       }
     }
@@ -483,7 +487,7 @@ export class NotionAdapter implements NotionPort {
       },
     });
     if (!isFullDatabase(created)) {
-      throw new Error("Banco Eventos incompleto");
+      throw new Error("Banco Histórico de eventos incompleto");
     }
     return created.id;
   }

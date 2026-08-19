@@ -7,6 +7,8 @@ import { ok, type Result } from "../result.js";
 import {
   InboxRunSchema,
   type InboxRun,
+  type ProjectEventBoard,
+  type ProjectTaskBoard,
   type TodoistProject,
   type TodoistTask,
 } from "../schemas.js";
@@ -24,11 +26,15 @@ import {
   calendarEventBody,
   conflictComment,
   conflictWindow,
+  eventCaptureText,
   expandOccurrences,
   EventSlotSchema,
+  type EventSlot,
   findConflict,
   hydrateEventPage,
+  parseCaptureEventSlot,
   resolveEventSlot,
+  humanEventComments,
 } from "./eventPlan.js";
 import { extractJson } from "./json.js";
 import {
@@ -201,6 +207,9 @@ async function processEvent(
     throw new Error(comments.error.message);
   }
 
+  const humanComments = humanEventComments(comments.value);
+  const captureText = eventCaptureText(task, comments.value);
+
   const notionProjects = await input.notion.listDatabasePages();
   if (!notionProjects.ok) {
     return abortEvent(
@@ -213,7 +222,7 @@ async function processEvent(
   const reply = await input.llm.complete(
     eventSlotPrompt({
       task,
-      comments: comments.value,
+      comments: humanComments,
       today: input.today,
       existingProjectNames: notionProjects.value.map((page) => page.title),
     }),
@@ -222,14 +231,15 @@ async function processEvent(
     throw new Error(reply.error.message);
   }
 
-  let slot;
+  let slot = emptyEventSlot();
   try {
     slot = EventSlotSchema.parse(extractJson(reply.value));
   } catch {
-    return abortEvent(input.todoist, task, "horário ilegível");
+    slot = emptyEventSlot();
   }
 
-  const resolved = resolveEventSlot(slot);
+  const resolved =
+    resolveEventSlot(slot) ?? parseCaptureEventSlot(captureText, input.today);
   if (!resolved) {
     return abortEvent(input.todoist, task, "horário ilegível");
   }
@@ -250,7 +260,7 @@ async function processEvent(
     return abortEvent(input.todoist, task, conflictComment(conflict));
   }
 
-  const page = hydrateEventPage(slot, task, comments.value);
+  const page = hydrateEventPage(slot, task, humanComments);
   if (!page) {
     return abortEvent(input.todoist, task, "projeto ilegível");
   }
@@ -268,19 +278,20 @@ async function processEvent(
     );
   }
 
-  const board = await input.notion.ensureProjectEventBoard(
+  const layout = await ensureProjectPageLayout(
+    input.notion,
     notionPage.value.pageId,
   );
-  if (!board.ok) {
+  if (!layout.ok) {
     return abortEvent(
       input.todoist,
       task,
-      `histórico Notion falhou (${board.error.message})`,
+      `página Notion falhou (${layout.error.message})`,
     );
   }
 
   const eventPage = await input.notion.createProjectEvent({
-    dataSourceId: board.value.dataSourceId,
+    dataSourceId: layout.value.eventBoard.dataSourceId,
     title: page.pageTitle,
     date: civilDateOfIso(resolved.range.start.iso),
     markdown: page.markdown,
@@ -312,6 +323,20 @@ async function processEvent(
 
   await requireOk(input.todoist.completeTask(task.id));
   return `${task.content} · ${page.projectName} · ${resolved.range.start.iso}–${resolved.range.end.iso}`;
+}
+
+function emptyEventSlot(): EventSlot {
+  return EventSlotSchema.parse({
+    insufficient: true,
+    start: null,
+    end: null,
+    recurrence: null,
+    projectName: "",
+    pageTitle: "",
+    cue: "",
+    markdown: "",
+    steps: [],
+  });
 }
 
 async function abortEvent(
@@ -451,23 +476,26 @@ async function processProject(
     };
   }
 
-  const board = await input.notion.ensureProjectTaskBoard(notionPage.value.pageId);
-  if (!board.ok) {
+  const layout = await ensureProjectPageLayout(
+    input.notion,
+    notionPage.value.pageId,
+  );
+  if (!layout.ok) {
     return {
       status: "skipped",
-      reason: `${task.id}: kanban Notion falhou (${board.error.message}) — ficou na Inbox`,
+      reason: `${task.id}: página Notion falhou (${layout.error.message}) — ficou na Inbox`,
     };
   }
 
   const existingTitles = new Set(
-    board.value.tasks.map((card) => card.title),
+    layout.value.taskBoard.tasks.map((card) => card.title),
   );
   for (const planned of tasks) {
     if (existingTitles.has(planned.title)) {
       continue;
     }
     const card = await input.notion.createProjectTask({
-      dataSourceId: board.value.dataSourceId,
+      dataSourceId: layout.value.taskBoard.dataSourceId,
       title: planned.title,
       column: planned.column,
     });
@@ -589,6 +617,29 @@ async function planProject(
     throw new Error(reply.error.message);
   }
   return ProjectPlanSchema.parse(extractJson(reply.value));
+}
+
+async function ensureProjectPageLayout(
+  notion: NotionPort,
+  pageId: string,
+): Promise<
+  Result<{
+    readonly taskBoard: ProjectTaskBoard;
+    readonly eventBoard: ProjectEventBoard;
+  }>
+> {
+  const taskBoard = await notion.ensureProjectTaskBoard(pageId);
+  if (!taskBoard.ok) {
+    return taskBoard;
+  }
+  const eventBoard = await notion.ensureProjectEventBoard(pageId);
+  if (!eventBoard.ok) {
+    return eventBoard;
+  }
+  return ok({
+    taskBoard: taskBoard.value,
+    eventBoard: eventBoard.value,
+  });
 }
 
 async function requireOk<T>(result: Promise<Result<T>>): Promise<T> {

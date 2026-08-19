@@ -44,7 +44,8 @@ export const FILTER_CATALOG = [PENDING_FILTER] as const;
 
 export const NOTION_PROJECT_STATUS_IN_PROGRESS = "Em andamento" as const;
 export const NOTION_PROJECT_STATUS_NOT_STARTED = "Não iniciada" as const;
-export const NOTION_EVENTS_DB_TITLE = "Eventos" as const;
+export const NOTION_EVENTS_DB_TITLE = "Histórico de eventos" as const;
+export const NOTION_EVENTS_DB_TITLE_LEGACY = "Eventos" as const;
 
 export function isNotionProjectInProgress(status: string | null): boolean {
   return status === NOTION_PROJECT_STATUS_IN_PROGRESS;

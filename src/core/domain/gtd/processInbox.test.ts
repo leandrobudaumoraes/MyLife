@@ -89,6 +89,9 @@ test("item Project vira projeto PARA, DOING no Todoist e kanban no Notion", asyn
   assert.equal(notion.cards[0]?.column, "DOING");
   assert.equal(notion.cards[1]?.column, "TO DO");
   assert.equal(notion.lastSelect, "Instituto");
+  assert.equal(notion.eventBoardCount, 1);
+  assert.equal(notion.taskBoardCount, 1);
+  assert.equal(notion.eventCards.length, 0);
 });
 
 test("Project com select nulo no LLM grava Pessoal no Notion", async () => {
@@ -265,9 +268,11 @@ test("Event com slot livre cria no Calendar, página Notion e completa a tarefa"
   assert.equal(calendar.inserts[0]?.summary, "Consulta com nutrologo");
   assert.equal(calendar.inserts[0]?.recurrence, null);
   assert.equal(notion.lastSelect, "Pessoal");
-  assert.equal(notion.pages[0]?.title, "Consulta com nutrólogo");
+  assert.equal(notion.pages[0]?.title, "Cuidar da vitalidade");
   assert.equal(notion.pages[0]?.status, "Não iniciada");
   assert.equal(notion.eventCards[0]?.title, "Consulta com nutrologo");
+  assert.equal(notion.eventBoardCount, 1);
+  assert.equal(notion.taskBoardCount, 1);
   assert.match(calendar.inserts[0]?.description ?? "", /Cue:/);
   assert.match(calendar.inserts[0]?.description ?? "", /Spec:/);
   assert.match(
@@ -340,6 +345,47 @@ test("Event com horário ilegível ganha Pending e fica na Inbox", async () => {
   assert.ok(todoist.tasks[0]?.labels.includes("Pending"));
   assert.deepEqual(todoist.comments.get("t-event"), ["horário ilegível"]);
   assert.equal(calendar.inserts.length, 0);
+});
+
+test("Event com domingo as 18:00 cria mesmo se o LLM disser insufficient", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Discussão sobre a viagem a PERU",
+      description: "domingo as 18:00",
+      labels: ["Event"],
+    }),
+  ]);
+  todoist.comments.set("t-event", ["horário ilegível", "horário ilegível"]);
+  const calendar = new MemoryCalendar();
+  const notion = new MemoryNotion();
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([
+      eventPlanJson({
+        insufficient: true,
+        start: null,
+        end: null,
+        projectName: "Planejar viagem para Peru",
+        pageTitle: "Discussão sobre a viagem a PERU",
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-19",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(todoist.tasks[0]?.isCompleted, true);
+  assert.equal(calendar.inserts[0]?.summary, "Discussão sobre a viagem a PERU");
+  assert.equal(calendar.inserts[0]?.range.start.iso, "2026-08-23T18:00:00-03:00");
+  assert.equal(calendar.inserts[0]?.range.end.iso, "2026-08-23T19:00:00-03:00");
+  assert.equal(notion.pages[0]?.title, "Planejar viagem para Peru");
+  assert.ok(!todoist.tasks[0]?.labels.includes("Pending"));
 });
 
 test("Event em conflito não cria e trava com Pending", async () => {
@@ -548,9 +594,12 @@ test("Event associa pilar, reusa o projeto Notion e formata o corpo do Calendar"
   }
   assert.equal(todoist.tasks[0]?.isCompleted, true);
   assert.equal(notion.pages.length, 1);
+  assert.equal(notion.pages[0]?.title, "Melhorar o sono");
   assert.equal(notion.pages[0]?.status, "Pausado");
   assert.equal(notion.lastSelect, "Pessoal");
   assert.equal(notion.eventCards[0]?.title, "Ao dormir");
+  assert.equal(notion.eventBoardCount, 1);
+  assert.equal(notion.taskBoardCount, 1);
   assert.equal(notion.eventMarkdown.get("Ao dormir"), markdown);
   assert.equal(calendar.inserts[0]?.summary, "Ao dormir");
   assert.match(
@@ -1110,7 +1159,7 @@ function eventPlanJson(
     start: "2026-08-20T10:00:00-03:00",
     end: "2026-08-20T11:00:00-03:00",
     recurrence: null,
-    projectName: "Consulta com nutrólogo",
+    projectName: "Cuidar da vitalidade",
     select: "Pessoal",
     pageTitle: "Consulta com nutrologo",
     cue: "10:00: chegar com documentos e lista de dúvidas.",
@@ -1125,11 +1174,12 @@ function task(input: {
   readonly id: string;
   readonly content: string;
   readonly labels: string[];
+  readonly description?: string;
 }): TodoistTask {
   return {
     id: input.id,
     content: input.content,
-    description: "",
+    description: input.description ?? "",
     projectId: "inbox",
     sectionId: null,
     labels: input.labels,
@@ -1169,6 +1219,14 @@ class MemoryNotion implements NotionPort {
 
   get eventCards(): ProjectEventCard[] {
     return [...this.eventBoards.values()].flatMap((board) => board.cards);
+  }
+
+  get taskBoardCount(): number {
+    return this.boards.size;
+  }
+
+  get eventBoardCount(): number {
+    return this.eventBoards.size;
   }
 
   pageStatus(pageId: string): string | null {

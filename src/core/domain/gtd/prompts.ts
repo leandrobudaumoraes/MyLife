@@ -86,17 +86,18 @@ export function eventSlotPrompt(input: {
       : input.existingProjectNames.map((name) => `- ${name}`).join("\n");
 
   return [
-    "Esta captura da Inbox Todoist tem a etiqueta Event: vira UM compromisso no Google Calendar e UMA página no Notion.",
-    "Não reescreva o título em GTD. Não invente dia, hora nem recorrência que o texto não peça.",
+    "Esta captura da Inbox Todoist tem a etiqueta Event: vira UM compromisso no Google Calendar e UMA página no histórico do projeto PARA no Notion.",
+    "Não reescreva o título em GTD. Não invente hora nem recorrência que o texto não peça.",
     "Não invente dose, medicamento nem conduta que o texto não trouxe. Melhore clareza e formatação.",
     `Hoje (America/Sao_Paulo): ${input.today}.`,
     "Responda só JSON:",
-    '{"insufficient":false,"start":"2026-08-20T15:30:00-03:00","end":"2026-08-20T16:30:00-03:00","recurrence":null,"projectName":"Consulta no otorrino","select":"Pessoal","pageTitle":"Consulta com otorrino","cue":"15:30: chegar 10 min antes, documentos.","steps":["Chegar 10 minutos antes","Levar documentos","Consultar"],"markdown":"> cue\\n\\n## Agora\\n1. ..."}',
+    '{"insufficient":false,"start":"2026-08-20T15:30:00-03:00","end":"2026-08-20T16:30:00-03:00","recurrence":null,"projectName":"Cuidar da vitalidade","select":"Pessoal","pageTitle":"Consulta com otorrino","cue":"15:30: chegar 10 min antes, documentos.","steps":["Chegar 10 minutos antes","Levar documentos","Consultar"],"markdown":"> cue\\n\\n## Agora\\n1. ..."}',
     "start e end: ISO com fuso -03:00. Se só houver hora de início, end=null (o código põe 60 min).",
     "recurrence: null se for avulso. Se o texto pedir série: {\"freq\":\"DAILY\"|\"WEEKLY\"|\"MONTHLY\",\"interval\":1,\"byDay\":[\"MO\"],\"until\":\"2026-09-03\" ou null}.",
     "byDay só em WEEKLY (MO TU WE TH FR SA SU). until só se o texto disser até quando.",
-    "insufficient:true se faltar dia ou hora — aí start=null, end=null, recurrence=null. Não chute amanhã.",
-    "projectName: resultado PARA curto, distinto de listas GTD e pilares. Só reutilize um nome da lista se a captura for O MESMO resultado — consulta não reusa projeto de sono.",
+    "insufficient:true só se faltar a HORA. Dia da semana (domingo, sábado, sexta…) conta como dia: use a PRÓXIMA ocorrência a partir de Hoje (se hoje for esse dia, use hoje). start em ISO com -03:00.",
+    "projectName: o PARA ao qual o evento PERTENCE (outcome), nunca o nome do compromisso. pageTitle é o evento. Reutilize um nome da lista se a captura for daquele resultado. Consulta de saúde reusa o PARA de vitalidade/saúde se existir; não crie um projeto 'Consulta no dermatologista'.",
+    "Se a lista estiver vazia, nomeie um resultado que poderia ter kanban depois — não um sinônimo do título da captura.",
     `Pilares reservados: ${PILLAR_PROJECTS.join(" / ")}. Listas: ${GTD_NEXT_ACTIONS}, ${GTD_INCUBATE}, ${GTD_ARCHIVE}.`,
     "select: SEMPRE um dos cinco. Mapa: Família→Familia; Casa ou financeiro do lar→Casa; Instituto→Instituto; Loja Lua Branca→Loja; Saúde, amizades, Engenharia/IA/carreira/PagBank ou dúvida→Pessoal. Nunca null.",
     "pageTitle: nome curto do evento (em geral o título da captura).",

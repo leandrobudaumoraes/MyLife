@@ -8,6 +8,7 @@ import {
   findConflict,
   hydrateEventPage,
   isUsableEventProject,
+  parseCaptureEventSlot,
   resolveEventSlot,
 } from "./eventPlan.js";
 import type { CalendarEvent } from "../schemas.js";
@@ -41,6 +42,23 @@ test("só hora de início vira 60 minutos", () => {
     recurrence: null,
   });
   assert.equal(resolved?.range.end.iso, "2026-08-20T11:00:00-03:00");
+});
+
+test("domingo as 18:00 na quarta vira o próximo domingo", () => {
+  const resolved = parseCaptureEventSlot(
+    "Discussão sobre a viagem a PERU\ndomingo as 18:00",
+    "2026-08-19",
+  );
+  assert.equal(resolved?.range.start.iso, "2026-08-23T18:00:00-03:00");
+  assert.equal(resolved?.range.end.iso, "2026-08-23T19:00:00-03:00");
+  assert.equal(resolved?.recurrence, null);
+});
+
+test("todo domingo as 18:00 vira série semanal", () => {
+  const resolved = parseCaptureEventSlot("todo domingo as 18:00", "2026-08-19");
+  assert.equal(resolved?.range.start.iso, "2026-08-23T18:00:00-03:00");
+  assert.equal(resolved?.recurrence?.freq, "WEEKLY");
+  assert.deepEqual(resolved?.recurrence?.byDay, ["SU"]);
 });
 
 test("série diária olha 14 dias à frente", () => {

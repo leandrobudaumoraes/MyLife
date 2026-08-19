@@ -82,6 +82,118 @@ export function resolveEventSlot(
   };
 }
 
+const WEEKDAY_PT: ReadonlyArray<readonly [RegExp, WeekdayCode]> = [
+  [/^domingos?$/, "SU"],
+  [/^segunda(?:s|-feira)?$/, "MO"],
+  [/^ter[cç]a(?:s|-feira)?$/, "TU"],
+  [/^quarta(?:s|-feira)?$/, "WE"],
+  [/^quinta(?:s|-feira)?$/, "TH"],
+  [/^sexta(?:s|-feira)?$/, "FR"],
+  [/^s[áa]bados?$/, "SA"],
+];
+
+const PROCESSOR_EVENT_COMMENT =
+  /^(horário ilegível|projeto ilegível|conflito com |Notion falhou|página Notion falhou|página do evento falhou)/i;
+
+export function humanEventComments(comments: readonly string[]): string[] {
+  return comments.filter(
+    (comment) => !PROCESSOR_EVENT_COMMENT.test(comment.trim()),
+  );
+}
+
+export function eventCaptureText(
+  task: { readonly content: string; readonly description: string },
+  comments: readonly string[],
+): string {
+  return [task.content, task.description, ...humanEventComments(comments)]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+export function parseCaptureEventSlot(
+  text: string,
+  today: string,
+): ResolvedEventSlot | null {
+  const normalized = text.normalize("NFC").toLowerCase();
+  const time = matchClock(normalized);
+  if (!time) {
+    return null;
+  }
+  const weekly = /\btodos?\s+(?:os\s+)?/.test(normalized);
+  const daily = /\btodo\s+dia\b/.test(normalized);
+  const weekday = matchWeekday(normalized);
+  if (!weekday && !daily) {
+    return null;
+  }
+  const date = daily
+    ? today
+    : nextCivilDateForWeekday(today, weekday ?? "SU");
+  const start = `${date}T${time}-03:00`;
+  const end = addMinutesIso(start, 60);
+  return {
+    range: { start: { iso: start }, end: { iso: end } },
+    recurrence: daily
+      ? { freq: "DAILY", interval: 1, byDay: [], until: null }
+      : weekly && weekday
+        ? { freq: "WEEKLY", interval: 1, byDay: [weekday], until: null }
+        : null,
+  };
+}
+
+function matchWeekday(text: string): WeekdayCode | null {
+  const match = text.match(
+    /\b(domingos?|segunda(?:s|-feira)?|ter[cç]a(?:s|-feira)?|quarta(?:s|-feira)?|quinta(?:s|-feira)?|sexta(?:s|-feira)?|s[áa]bados?)\b/,
+  );
+  if (!match?.[1]) {
+    return null;
+  }
+  const token = match[1];
+  for (const [pattern, code] of WEEKDAY_PT) {
+    if (pattern.test(token)) {
+      return code;
+    }
+  }
+  return null;
+}
+
+function matchClock(text: string): string | null {
+  const withMinutes = text.match(/\b(\d{1,2})[:h](\d{2})\b/);
+  if (withMinutes) {
+    return padClock(withMinutes[1], withMinutes[2]);
+  }
+  const hourOnly = text.match(/\b(\d{1,2})h\b/);
+  if (hourOnly) {
+    return padClock(hourOnly[1], "00");
+  }
+  return null;
+}
+
+function padClock(hourText: string | undefined, minuteText: string | undefined): string | null {
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return null;
+  }
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
+}
+
+function nextCivilDateForWeekday(today: string, weekday: WeekdayCode): string {
+  const delta =
+    (WEEKDAY_CODES.indexOf(weekday) -
+      WEEKDAY_CODES.indexOf(weekdayCode(today)) +
+      7) %
+    7;
+  return addCivilDays(today, delta);
+}
+
 export function conflictWindow(range: TimeRange, recurring: boolean): {
   readonly from: string;
   readonly until: string;
@@ -239,7 +351,7 @@ function normalizeDateTime(value: string | null): string | null {
   if (value === null) {
     return null;
   }
-  const trimmed = value.trim();
+  const trimmed = value.trim().replace(" ", "T");
   if (!ISO_DATE_TIME.test(trimmed)) {
     return null;
   }
