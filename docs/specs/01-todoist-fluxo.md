@@ -1,6 +1,6 @@
 # Spec 01 — Fluxo Todoist
 
-Status: **alinhada** (2026-08-19) — 12ª: página do projeto = kanban `Tarefas` + `Histórico de eventos`  
+Status: **alinhada** (2026-08-19) — 13ª: pilares só no Notion; Todoist `📁 Projetos` = só PARA  
 Código do processador: **nesta corrida** (ensure GTD + Inbox + avanço + `Event` com página no histórico do PARA). A conta **não** precisa existir na mão.
 
 Captura humana = **Inbox nativa do Todoist** + **uma** etiqueta de roteamento.  
@@ -23,7 +23,7 @@ Contrato = **nomes canônicos** desta nota. IDs não entram no domínio: servem 
 | **Ação** | **Projeto `⏩ Próximas ações`** | Próxima ação física, já filtrada (`Next`) |
 | Algum dia | **Projeto `💤 Encubar`** | Pertence à vida, mas não será pego ainda |
 | Referência | **Projeto `📌 Arquivar`** | Guardar, não fazer |
-| Projetos PARA | Pasta `📁 Projetos` + pilares + **um projeto por resultado finito** | Pilar não recebe item desta corrida. `Project` cria um filho PARA, não move para pilar |
+| Projetos PARA | Pasta `📁 Projetos` + **um projeto por resultado finito** | Sem pasta/projeto de pilar no Todoist. Pilar mora no Notion (`Selecionar`). `Project` cria um filho PARA |
 | Relógio | Google Calendar (Gmail) | Caminho `Event`: compromisso esporádico (ou série pedida no texto) se o slot estiver livre. Corpo = cue + passos + URL da página. Sem due no Todoist. |
 | Plano | Notion banco `Projects` | Página da linha: kanban `Tarefas` **e** `Histórico de eventos`. `Project` preenche o kanban. `Event`: compromisso no Calendar + página no histórico — **não** é tarefa. Evento **sempre** pertence a um PARA. |
 | Porquê | Vault | Contexto que o LLM pode ler (`Next` e `Project`) |
@@ -38,7 +38,7 @@ TDAH: um inbox. Um destino por item. `Next` / `Maybe` / `Archive` **não** explo
 
 Listas GTD e projetos de verdade **não se misturam**. Inbox é a nativa — nunca um projeto chamado Inbox.
 
-Pilares são filhos fixos de `📁 Projetos`. Projetos PARA (resultado finito) também são filhos dessa pasta, **ao lado** dos pilares — nunca com o nome canônico de um pilar.
+Pilar **não** é projeto Todoist. Vive só no Notion, na propriedade `Selecionar` da linha `Projects`. Filhos de `📁 Projetos` são **somente** resultados PARA — nunca um projeto com o nome canônico de um pilar.
 
 ```
 Inbox                          ← nativa; não criar
@@ -46,13 +46,6 @@ Inbox                          ← nativa; não criar
 💤 Encubar                     ← lista GTD (raiz) — algum dia / talvez
 📌 Arquivar                    ← lista GTD (raiz) — referência
 📁 Projetos                    ← pasta (projeto-pai)
-  🩺 Saúde                     ← pilar (ensure)
-  👨 Família                   ← pilar (ensure)
-  🏠 Casa                      ← pilar (ensure)
-  💰 Financeiro                ← pilar (ensure)
-  🤝 Amizades                  ← pilar (ensure)
-  🕍 Instituto                 ← pilar (ensure)
-  🌙 Loja Lua Branca           ← pilar (ensure)
   <resultado PARA>             ← filho criado pelo caminho `Project` (§3.5)
 ```
 
@@ -61,14 +54,7 @@ Inbox                          ← nativa; não criar
 | `⏩ Próximas ações` | projeto raiz | Destino de `Next` |
 | `💤 Encubar` | projeto raiz | Destino de `Maybe` |
 | `📌 Arquivar` | projeto raiz | Destino de `Archive` |
-| `📁 Projetos` | projeto raiz, pasta | Pai dos pilares **e** dos projetos PARA |
-| `🩺 Saúde` | filho de `📁 Projetos` | Pilar |
-| `👨 Família` | filho de `📁 Projetos` | Pilar |
-| `🏠 Casa` | filho de `📁 Projetos` | Pilar |
-| `💰 Financeiro` | filho de `📁 Projetos` | Pilar |
-| `🤝 Amizades` | filho de `📁 Projetos` | Pilar |
-| `🕍 Instituto` | filho de `📁 Projetos` | Pilar |
-| `🌙 Loja Lua Branca` | filho de `📁 Projetos` | Pilar |
+| `📁 Projetos` | projeto raiz, pasta | Pai **só** dos projetos PARA |
 
 **Não criar nunca**
 
@@ -79,6 +65,7 @@ Inbox                          ← nativa; não criar
 - O pai da conta (`Leandro Budau Moraes` ou equivalente)
 - Projeto por órgão, por cápsula, por tipo de oficina
 - Etiqueta com nome de pilar
+- Projeto Todoist com nome de pilar (`🩺 Saúde`, `👨 Família`, `🏠 Casa`, `💰 Financeiro`, `🤝 Amizades`, `🕍 Instituto`, `🌙 Loja Lua Branca`)
 - Projeto PARA com o **mesmo nome canônico** de um pilar ou de uma lista GTD
 
 Projetos que o humano já tiver além desta árvore (ex.: `Normalizar o instituto`) **permanecem**. O ensure não apaga, não renomeia e não funde. O caminho `Project` **reusa** se o nome gerado coincidir com um filho já existente de `📁 Projetos`.
@@ -92,7 +79,7 @@ Ordem:
 1. Listar projetos e etiquetas da conta.
 2. Se faltar `📁 Projetos`, criar na raiz.
 3. Se faltar lista GTD da raiz (`⏩ Próximas ações`, `💤 Encubar`, `📌 Arquivar`), criar na raiz.
-4. Se faltar pilar, criar **já como filho** de `📁 Projetos`.
+4. **Não** criar pilar no Todoist. Pilar é só `Selecionar` no Notion.
 5. Se faltar etiqueta do catálogo §2.2, §2.3, §2.4 ou §2.5, criar com o nome e a cor da tabela.
 6. Se faltar o filtro `Pendentes` (§2.5), criar com o nome e a query da tabela.
 
@@ -293,8 +280,8 @@ O LLM propõe **um** nome de resultado PARA:
 
 - Curto. Outcome, não verbo solto. (`Normalizar o instituto`, não `preciso organizar o instituto essa semana` nem `Project`).
 - Distinto dos nomes canônicos da §2.
-- Se já existir filho de `📁 Projetos` com o **mesmo nome exato**, **reusa** — não duplica, não renomeia, não move.
-- Antes de nomear, o LLM vê a lista atual de filhos de `📁 Projetos` (pilares + PARA já existentes) e reusa quando a captura é o mesmo resultado.
+- Se já existir filho de `📁 Projetos` com o **mesmo nome exato**, **reusa** — não duplica, não renomeia, não move. Nome canônico de pilar **não** conta como PARA: não reusa, não cria.
+- Antes de nomear, o LLM vê a lista atual de filhos PARA de `📁 Projetos` (sem pilares leftover) e reusa quando a captura é o mesmo resultado.
 - Conteúdo insuficiente para um resultado → **deixa na Inbox**. Não inventa projeto.
 
 #### 3.5.3 Materializar no Todoist
@@ -349,7 +336,7 @@ Uma linha no banco `Projects`:
 | `Status` | `Em andamento` ao abrir (há uma DOING). Humano pausa com `Pausado` (senão `Não iniciada` / `Concluído`). Só `Em andamento` entra na §3.7 |
 | `Selecionar` | Sempre um de `Pessoal` `Familia` `Loja` `Casa` `Instituto`. Na dúvida, `Pessoal`. Não cria opção nova |
 
-Mapa quando o conteúdo aponta para um pilar Todoist:
+Mapa quando o conteúdo aponta para um pilar (Notion `Selecionar`, não projeto Todoist):
 
 | Sinal | `Selecionar` |
 |---|---|
@@ -448,7 +435,7 @@ O processador lê o item **inteiro**, não só o título:
 O LLM extrai **um** intervalo em `America/Sao_Paulo` **e** o envelope Notion:
 
 - `summary`: o título da tarefa, sem reescrever em GTD
-- início (data + hora). Dia da semana (`domingo as 18:00`) **conta**: a próxima ocorrência a partir de hoje (`America/Sao_Paulo`). Se hoje for esse dia, use hoje. Não exige `2026-08-23` por escrito.
+- início (data + hora). Linguagem natural do Todoist **conta** — no título, descrição ou comentário. Não exige `2026-08-23` por escrito. Data: `hoje`, `amanhã`, `ontem`, `depois de amanhã`, dia da semana (`domingo`, `segunda`, `segunda-feira`, `seg`, `2ª`, `terça`… `sábado`), `próxima segunda`, `próxima semana`, `neste fim de semana`, `em 5 dias`, `27/08`, `27 ago`. Dia da semana = próxima ocorrência a partir de hoje (`America/Sao_Paulo`); se hoje for esse dia, use hoje. Hora: `18:00`, `18h`, `às 18`, `às 10`, `meio-dia`, `de manhã` (09:00), `de tarde` (12:00), `de noite` (19:00). Se só houver hora, use hoje.
 - fim: o texto; se só houver hora de início, **60 minutos**
 - recorrência, se o texto pedir (`todo dia`, `toda terça`, `todo domingo`, até quando)
 - `projectName`: o PARA ao qual o evento **pertence** (outcome curto). Distinto dos nomes canônicos da §2. **Não** use o título do compromisso. Se já existir linha no banco `Projects` com o **mesmo nome exato**, **reusa**. Consulta de saúde reusa o PARA de vitalidade/saúde se existir. Conteúdo insuficiente para nomear o projeto → **abortar** (`projeto ilegível`)
@@ -512,7 +499,7 @@ Se o Notion falhar depois do slot livre: **não** chama `upsertEvent`; aborta co
 | Método | Uso |
 |---|---|
 | `listProjects` | Ensure: detectar falta; `Project`: listar filhos de `📁 Projetos` |
-| `createProject` | Ensure: lista GTD, pasta `📁 Projetos` ou pilar. `Project`: filho PARA |
+| `createProject` | Ensure: lista GTD ou pasta `📁 Projetos`. `Project`: filho PARA. **Nunca** pilar |
 | listar / criar etiqueta | Ensure: catálogo §2.2, §2.3, §2.4 e §2.5 |
 | listar / criar filtro | Ensure: `Pendentes` (`@Pending`) |
 | `listTasks` (Inbox) | Captura filtrada |
@@ -538,13 +525,13 @@ O domínio não importa o SDK. Testes mockam a porta. Nomes canônicos vivem no 
 
 ## 6. Tensão com o vault
 
-O Second Brain ainda tem seis pilares, outros nomes, sem Amizades / Financeiro. Engenharia continua só no relógio. Alinhar o vault é outra nota — esta spec manda na conta Todoist, no caminho `Project` / `Event` no banco Notion `Projects` do MyLife, e no caminho `Event` no Calendar Gmail. Não reescreve o Protocolo de Agenda. Não grava no banco Specs da Agenda.
+O Second Brain ainda tem seis pilares, outros nomes, sem Amizades / Financeiro. Engenharia continua só no relógio. Alinhar o vault é outra nota — esta spec manda na conta Todoist **sem** projeto de pilar, no caminho `Project` / `Event` no banco Notion `Projects` do MyLife (pilar = `Selecionar`), e no caminho `Event` no Calendar Gmail. Não reescreve o Protocolo de Agenda. Não grava no banco Specs da Agenda.
 
 ---
 
 ## 7. Fechado
 
-1. Nenhuma pasta, etiqueta **nem filtro** desta spec se cria na mão. O ensure da corrida materializa a árvore GTD, o catálogo e o filtro `Pendentes`.
+1. Nenhuma pasta, etiqueta **nem filtro** desta spec se cria na mão. O ensure da corrida materializa a árvore GTD (listas + pasta `📁 Projetos`), o catálogo e o filtro `Pendentes`. **Não** materializa pilar no Todoist.
 2. A spec é portátil: outra conta Todoist + o mesmo token no `.env` chega no mesmo GTD, pelos nomes, não pelos IDs.
 3. O humano escolhe o destino com `Next` / `Maybe` / `Archive` / `Project` / `Event`. O processador não classifica destino.
 4. Sem uma dessas etiquetas (ou com mais de uma) → a tarefa **fica** na Inbox.
@@ -557,14 +544,14 @@ O Second Brain ainda tem seis pilares, outros nomes, sem Amizades / Financeiro. 
 11. Toda corrida, depois da Inbox, cruza kanban Notion × PARA no Todoist **só nas linhas `Em andamento`**. Humano conclui **no Todoist**. PARA vazio: cards `DOING` viram `DONE`; sobe a primeira `TO DO` (senão `BACKLOG`) e cria essa tarefa no Todoist com `Doing` + contexto. PARA com tarefa aberta não mexe. Página sem `Tarefas` fica de fora. `Pausado` / `Não iniciada` / `Concluído`: não promove; PARA vazio só espelha `DONE`. Retomada: `Status` de volta a `Em andamento`, ou um `Doing` novo no Todoist depois que o kanban já não tem `DOING`.
 12. `Event` → lê título, descrição, comentários e conteúdo; propõe um intervalo no Calendar Gmail; nomeia (ou reusa) o PARA ao qual o compromisso **pertence** (não o nome do evento) e o pilar em `Selecionar`. Slot livre: garante kanban + `Histórico de eventos` na página, grava a página no histórico, cria o evento (cue + passos + URL) e **completa** a tarefa. Conflito, horário ilegível, projeto ilegível ou Notion falho: **não cria**; põe `Pending` + comentário; `Event` fica. Com `Pending`, a corrida **não varre**. O humano tira `Pending` para tentar de novo. Filtro `Pendentes` = `@Pending`.
 13. `Event` **não** apaga série da grade, **não** marca due, **não** cria spec da agenda, **não** aplica contexto, **não** cria projeto no Todoist, **não** vira card de `Tarefas`. Recorrência = uma página, não N. Compromisso **não** vira um PARA próprio.
-14. Esta corrida **não** marca Hoje e **não** move para pilar.
-15. Sem lista Aguardando. Sem Engenharia. Ensure não apaga o que já existe.
+14. Esta corrida **não** marca Hoje e **não** cria nem move para pilar no Todoist.
+15. Sem lista Aguardando. Sem Engenharia. Ensure não apaga o que já existe (pilar leftover de corrida antiga permanece até o humano apagar).
 
 Próximas modificações ficam de fora desta nota até o Leandro pedir.
 
 ## 8. Snapshot desta conta (não é contrato)
 
-Leandro, 2026-08-18. Só documentação. O código resolve por nome.
+Leandro, 2026-08-19. Só documentação. O código resolve por nome. Pilares abaixo são leftover da spec antiga — **não** recriar.
 
 | Nome | ID |
 |---|---|
@@ -572,12 +559,12 @@ Leandro, 2026-08-18. Só documentação. O código resolve por nome.
 | `💤 Encubar` | `6XmPMFCJGMMQQ5x8` |
 | `📌 Arquivar` | `6XmPMGxcjrRp8CWc` |
 | `📁 Projetos` | `6hHPV4W46wGrgWVW` |
-| `🩺 Saúde` | `6fGcGJpmjQ49X54h` |
-| `👨 Família` | `6chHqrXV8FjJx259` |
-| `🏠 Casa` | `6hHw9c6qpHQ9cJr2` |
-| `💰 Financeiro` | `6hHw9c9559X6x2V8` |
-| `🤝 Amizades` | `6hHw9cG32h8JxPP6` |
-| `🕍 Instituto` | `6cfjmmqfhW4282hQ` |
-| `🌙 Loja Lua Branca` | `6hHw9cMQM8qCCmvv` |
+| `🩺 Saúde` *(leftover)* | `6fGcGJpmjQ49X54h` |
+| `👨 Família` *(leftover)* | `6chHqrXV8FjJx259` |
+| `🏠 Casa` *(leftover)* | `6hHw9c6qpHQ9cJr2` |
+| `💰 Financeiro` *(leftover)* | `6hHw9c9559X6x2V8` |
+| `🤝 Amizades` *(leftover)* | `6hHw9cG32h8JxPP6` |
+| `🕍 Instituto` *(leftover)* | `6cfjmmqfhW4282hQ` |
+| `🌙 Loja Lua Branca` *(leftover)* | `6hHw9cMQM8qCCmvv` |
 
 Notion (espelho `Project`, não é ID de domínio): banco [Projects](https://app.notion.com/p/3c0f94d8161080298749c108aa746c05) via `NOTION_PROJECTS_DB_ID`.

@@ -61,6 +61,67 @@ test("todo domingo as 18:00 vira série semanal", () => {
   assert.deepEqual(resolved?.recurrence?.byDay, ["SU"]);
 });
 
+test("amanhã, hoje, ontem e depois de amanhã resolvem a data", () => {
+  assert.equal(
+    parseCaptureEventSlot("Consulta amanhã às 18:00", "2026-08-19")?.range.start
+      .iso,
+    "2026-08-20T18:00:00-03:00",
+  );
+  assert.equal(
+    parseCaptureEventSlot("hoje as 10", "2026-08-19")?.range.start.iso,
+    "2026-08-19T10:00:00-03:00",
+  );
+  assert.equal(
+    parseCaptureEventSlot("ontem as 15h", "2026-08-19")?.range.start.iso,
+    "2026-08-18T15:00:00-03:00",
+  );
+  assert.equal(
+    parseCaptureEventSlot("depois de amanhã as 9h", "2026-08-19")?.range.start
+      .iso,
+    "2026-08-21T09:00:00-03:00",
+  );
+});
+
+test("segunda, sexta-feira e 18h sozinho usam o relógio do Todoist", () => {
+  assert.equal(
+    parseCaptureEventSlot("Reunião segunda as 9:00", "2026-08-19")?.range.start
+      .iso,
+    "2026-08-24T09:00:00-03:00",
+  );
+  assert.equal(
+    parseCaptureEventSlot("Sex @ 19h", "2026-08-19")?.range.start.iso,
+    "2026-08-21T19:00:00-03:00",
+  );
+  assert.equal(
+    parseCaptureEventSlot("18h", "2026-08-19")?.range.start.iso,
+    "2026-08-19T18:00:00-03:00",
+  );
+  assert.equal(
+    parseCaptureEventSlot("amanhã de manhã", "2026-08-19")?.range.start.iso,
+    "2026-08-20T09:00:00-03:00",
+  );
+});
+
+test("em 5 dias, 27/08 e 27 ago viram data civil", () => {
+  assert.equal(
+    parseCaptureEventSlot("em 5 dias as 14h", "2026-08-19")?.range.start.iso,
+    "2026-08-24T14:00:00-03:00",
+  );
+  assert.equal(
+    parseCaptureEventSlot("27/08 as 18:00", "2026-08-19")?.range.start.iso,
+    "2026-08-27T18:00:00-03:00",
+  );
+  assert.equal(
+    parseCaptureEventSlot("27 ago as 18h", "2026-08-19")?.range.start.iso,
+    "2026-08-27T18:00:00-03:00",
+  );
+});
+
+test("sem hora o Event não resolve, mesmo com amanhã", () => {
+  assert.equal(parseCaptureEventSlot("consulta amanhã", "2026-08-19"), null);
+  assert.equal(parseCaptureEventSlot("domingo", "2026-08-19"), null);
+});
+
 test("série diária olha 14 dias à frente", () => {
   const range = {
     start: { iso: "2026-08-20T10:00:00-03:00" },

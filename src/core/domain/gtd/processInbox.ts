@@ -17,7 +17,7 @@ import {
   GTD_ARCHIVE,
   GTD_INCUBATE,
   GTD_NEXT_ACTIONS,
-  PILLAR_PROJECTS,
+  isPillarProjectName,
   STATE_LABEL_DOING,
   STATE_LABEL_PENDING,
 } from "./catalog.js";
@@ -558,11 +558,10 @@ function paraProjectNames(
   projects: readonly TodoistProject[],
   folderId: string,
 ): string[] {
-  const pillars = new Set<string>(PILLAR_PROJECTS);
   return projects
     .filter(
       (project) =>
-        project.parentId === folderId && !pillars.has(project.name),
+        project.parentId === folderId && !isPillarProjectName(project.name),
     )
     .map((project) => project.name);
 }

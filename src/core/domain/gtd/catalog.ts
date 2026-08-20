@@ -3,6 +3,7 @@ export const GTD_INCUBATE = "💤 Encubar" as const;
 export const GTD_ARCHIVE = "📌 Arquivar" as const;
 export const GTD_PROJECTS_FOLDER = "📁 Projetos" as const;
 
+/** Nomes reservados: pilar mora no Notion (`Selecionar`), não no Todoist. */
 export const PILLAR_PROJECTS = [
   "🩺 Saúde",
   "👨 Família",
@@ -104,4 +105,8 @@ export function isContextLabel(name: string): name is ContextLabel {
 
 export function isReservedProjectName(name: string): boolean {
   return (RESERVED_PROJECT_NAMES as readonly string[]).includes(name);
+}
+
+export function isPillarProjectName(name: string): boolean {
+  return (PILLAR_PROJECTS as readonly string[]).includes(name);
 }

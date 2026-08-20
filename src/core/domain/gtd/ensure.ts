@@ -13,7 +13,6 @@ import {
   GTD_NEXT_ACTIONS,
   GTD_PROJECTS_FOLDER,
   LABEL_CATALOG,
-  PILLAR_PROJECTS,
 } from "./catalog.js";
 
 export type GtdTree = {
@@ -101,20 +100,6 @@ export async function ensureGtd(
       projects,
       name,
       null,
-      projectsCreated,
-    );
-    if (!created.ok) {
-      return created;
-    }
-    projects = upsertProject(projects, created.value);
-  }
-
-  for (const name of PILLAR_PROJECTS) {
-    const created = await ensureNamedProject(
-      todoist,
-      projects,
-      name,
-      folder.value.id,
       projectsCreated,
     );
     if (!created.ok) {

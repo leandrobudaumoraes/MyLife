@@ -347,6 +347,43 @@ test("Event com horário ilegível ganha Pending e fica na Inbox", async () => {
   assert.equal(calendar.inserts.length, 0);
 });
 
+test("Event com amanhã às 18:00 cria mesmo se o LLM disser insufficient", async () => {
+  const todoist = new MemoryTodoist([
+    task({
+      id: "t-event",
+      content: "Consulta com nutrologo",
+      description: "amanhã às 18:00",
+      labels: ["Event"],
+    }),
+  ]);
+  const calendar = new MemoryCalendar();
+  const notion = new MemoryNotion();
+  const result = await processInbox({
+    todoist,
+    notion,
+    llm: new ScriptedLlm([
+      eventPlanJson({
+        insufficient: true,
+        start: null,
+        end: null,
+        projectName: "Cuidar da vitalidade",
+        pageTitle: "Consulta com nutrologo",
+      }),
+    ]),
+    tree,
+    calendar,
+    calendarId: "gmail",
+    today: "2026-08-19",
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  assert.equal(todoist.tasks[0]?.isCompleted, true);
+  assert.equal(calendar.inserts[0]?.range.start.iso, "2026-08-20T18:00:00-03:00");
+  assert.equal(calendar.inserts[0]?.range.end.iso, "2026-08-20T19:00:00-03:00");
+});
+
 test("Event com domingo as 18:00 cria mesmo se o LLM disser insufficient", async () => {
   const todoist = new MemoryTodoist([
     task({

@@ -19,7 +19,7 @@ import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { LABEL_CATALOG } from "./catalog.js";
 import { ensureGtd } from "./ensure.js";
 
-test("ensure cria pasta, listas, pilares, o catálogo de etiquetas e o filtro Pendentes", async () => {
+test("ensure cria pasta, listas, o catálogo de etiquetas e o filtro Pendentes — sem pilares", async () => {
   const todoist = new MemoryTodoist();
   const result = await ensureGtd(todoist);
   assert.equal(result.ok, true);
@@ -30,7 +30,13 @@ test("ensure cria pasta, listas, pilares, o catálogo de etiquetas e o filtro Pe
   const names = todoist.projects.map((project) => project.name);
   assert.ok(names.includes("📁 Projetos"));
   assert.ok(names.includes("⏩ Próximas ações"));
-  assert.ok(names.includes("🩺 Saúde"));
+  assert.ok(!names.includes("🩺 Saúde"));
+  assert.ok(!names.includes("👨 Família"));
+  assert.ok(!names.includes("🏠 Casa"));
+  assert.ok(!names.includes("💰 Financeiro"));
+  assert.ok(!names.includes("🤝 Amizades"));
+  assert.ok(!names.includes("🕍 Instituto"));
+  assert.ok(!names.includes("🌙 Loja Lua Branca"));
 
   const labelNames = todoist.labels.map((label) => label.name);
   for (const spec of LABEL_CATALOG) {
@@ -49,6 +55,26 @@ test("ensure cria pasta, listas, pilares, o catálogo de etiquetas e o filtro Pe
   assert.deepEqual(again.value.labelsCreated, []);
   assert.deepEqual(again.value.filtersCreated, []);
   assert.deepEqual(again.value.projectsCreated, []);
+});
+
+test("ensure não apaga pilar leftover e não cria os que faltam", async () => {
+  const todoist = new MemoryTodoist();
+  todoist.projects.push({
+    id: "leftover-saude",
+    name: "🩺 Saúde",
+    parentId: "folder",
+    inboxProject: false,
+  });
+  const result = await ensureGtd(todoist);
+  assert.equal(result.ok, true);
+  if (!result.ok) {
+    return;
+  }
+  const names = todoist.projects.map((project) => project.name);
+  assert.ok(names.includes("🩺 Saúde"));
+  assert.ok(!names.includes("👨 Família"));
+  assert.ok(!result.value.projectsCreated.includes("🩺 Saúde"));
+  assert.ok(!result.value.projectsCreated.includes("👨 Família"));
 });
 
 class MemoryTodoist implements TodoistPort {

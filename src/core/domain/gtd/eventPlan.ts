@@ -83,13 +83,28 @@ export function resolveEventSlot(
 }
 
 const WEEKDAY_PT: ReadonlyArray<readonly [RegExp, WeekdayCode]> = [
-  [/^domingos?$/, "SU"],
-  [/^segunda(?:s|-feira)?$/, "MO"],
-  [/^ter[cç]a(?:s|-feira)?$/, "TU"],
-  [/^quarta(?:s|-feira)?$/, "WE"],
-  [/^quinta(?:s|-feira)?$/, "TH"],
-  [/^sexta(?:s|-feira)?$/, "FR"],
-  [/^s[áa]bados?$/, "SA"],
+  [/^domingos?$|^dom$/, "SU"],
+  [/^segunda(?:s|-feira)?$|^seg$|^2a$/, "MO"],
+  [/^tercas?(?:-feira)?$|^3a$/, "TU"],
+  [/^quarta(?:s|-feira)?$|^qua$|^4a$/, "WE"],
+  [/^quinta(?:s|-feira)?$|^qui$|^5a$/, "TH"],
+  [/^sexta(?:s|-feira)?$|^sex$|^6a$/, "FR"],
+  [/^sabados?$|^sab$/, "SA"],
+];
+
+const MONTH_PT: ReadonlyArray<readonly [RegExp, number]> = [
+  [/^(?:janeiro|jan)$/, 1],
+  [/^(?:fevereiro|fev)$/, 2],
+  [/^(?:marco|mar)$/, 3],
+  [/^(?:abril|abr)$/, 4],
+  [/^(?:maio|mai)$/, 5],
+  [/^(?:junho|jun)$/, 6],
+  [/^(?:julho|jul)$/, 7],
+  [/^(?:agosto|ago)$/, 8],
+  [/^(?:setembro|set)$/, 9],
+  [/^(?:outubro|out)$/, 10],
+  [/^(?:novembro|nov)$/, 11],
+  [/^(?:dezembro|dez)$/, 12],
 ];
 
 const PROCESSOR_EVENT_COMMENT =
@@ -115,40 +130,73 @@ export function parseCaptureEventSlot(
   text: string,
   today: string,
 ): ResolvedEventSlot | null {
-  const normalized = text.normalize("NFC").toLowerCase();
-  const time = matchClock(normalized);
+  const folded = foldPt(text);
+  const time = matchClock(folded);
   if (!time) {
     return null;
   }
-  const weekly = /\btodos?\s+(?:os\s+)?/.test(normalized);
-  const daily = /\btodo\s+dia\b/.test(normalized);
-  const weekday = matchWeekday(normalized);
-  if (!weekday && !daily) {
-    return null;
-  }
-  const date = daily
-    ? today
-    : nextCivilDateForWeekday(today, weekday ?? "SU");
+  const daily = isDaily(folded);
+  const weekdayHit = matchWeekdayHit(folded);
+  const weekly = Boolean(weekdayHit && isEvery(folded));
+  const date =
+    matchCivilDate(folded, today) ??
+    (weekdayHit
+      ? nextCivilDateForWeekday(
+          today,
+          weekdayHit.code,
+          weekdayHit.skipThisWeek,
+        )
+      : null) ??
+    (daily ? today : null) ??
+    today;
   const start = `${date}T${time}-03:00`;
   const end = addMinutesIso(start, 60);
   return {
     range: { start: { iso: start }, end: { iso: end } },
     recurrence: daily
       ? { freq: "DAILY", interval: 1, byDay: [], until: null }
-      : weekly && weekday
-        ? { freq: "WEEKLY", interval: 1, byDay: [weekday], until: null }
+      : weekly && weekdayHit
+        ? { freq: "WEEKLY", interval: 1, byDay: [weekdayHit.code], until: null }
         : null,
   };
 }
 
-function matchWeekday(text: string): WeekdayCode | null {
-  const match = text.match(
-    /\b(domingos?|segunda(?:s|-feira)?|ter[cç]a(?:s|-feira)?|quarta(?:s|-feira)?|quinta(?:s|-feira)?|sexta(?:s|-feira)?|s[áa]bados?)\b/,
+function foldPt(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .replaceAll("ª", "a")
+    .replaceAll("º", "o")
+    .toLowerCase();
+}
+
+function isDaily(text: string): boolean {
+  return /\b(?:todo\s+dia|todos\s+os\s+dias|diariamente|toda\s+(?:manha|tarde|noite))\b/.test(
+    text,
   );
-  if (!match?.[1]) {
+}
+
+function isEvery(text: string): boolean {
+  return /\btod[oa]s?\s+(?:os\s+|as\s+)?/.test(text);
+}
+
+function matchWeekdayHit(
+  text: string,
+): { readonly code: WeekdayCode; readonly skipThisWeek: boolean } | null {
+  const match = text.match(
+    /\b(proxima\s+)?(domingos?|dom|segunda(?:s|-feira)?|seg|2a|tercas?(?:-feira)?|3a|quarta(?:s|-feira)?|qua|4a|quinta(?:s|-feira)?|qui|5a|sexta(?:s|-feira)?|sex|6a|sabados?|sab)\b/,
+  );
+  if (!match?.[2]) {
     return null;
   }
-  const token = match[1];
+  const code = weekdayCodeOf(match[2]);
+  if (!code) {
+    return null;
+  }
+  return { code, skipThisWeek: Boolean(match[1]) };
+}
+
+function weekdayCodeOf(token: string): WeekdayCode | null {
   for (const [pattern, code] of WEEKDAY_PT) {
     if (pattern.test(token)) {
       return code;
@@ -157,16 +205,220 @@ function matchWeekday(text: string): WeekdayCode | null {
   return null;
 }
 
-function matchClock(text: string): string | null {
-  const withMinutes = text.match(/\b(\d{1,2})[:h](\d{2})\b/);
-  if (withMinutes) {
-    return padClock(withMinutes[1], withMinutes[2]);
+function matchCivilDate(text: string, today: string): string | null {
+  if (/\bdepois\s+de\s+amanha\b/.test(text)) {
+    return addCivilDays(today, 2);
   }
-  const hourOnly = text.match(/\b(\d{1,2})h\b/);
-  if (hourOnly) {
-    return padClock(hourOnly[1], "00");
+  if (/\bamanha\b|\btom\b/.test(text)) {
+    return addCivilDays(today, 1);
+  }
+  if (/\bontem\b/.test(text)) {
+    return addCivilDays(today, -1);
+  }
+  if (/\bhoje\b|\btod\b/.test(text)) {
+    return today;
+  }
+
+  const inDays = text.match(/\b(?:em|daqui\s+a|\+)\s*(\d+)\s+dias?\b/);
+  if (inDays?.[1]) {
+    return addCivilDays(today, Number(inDays[1]));
+  }
+  const inWeeks = text.match(/\b(?:em|daqui\s+a)\s*(\d+)\s+semanas?\b/);
+  if (inWeeks?.[1]) {
+    return addCivilDays(today, Number(inWeeks[1]) * 7);
+  }
+
+  if (/\bproxima\s+semana\b/.test(text)) {
+    return weekdayCode(today) === "MO"
+      ? addCivilDays(today, 7)
+      : nextCivilDateForWeekday(today, "MO", false);
+  }
+  if (/\bproximo\s+fim\s+de\s+semana\b/.test(text)) {
+    return nextCivilDateForWeekday(today, "SA", true);
+  }
+  if (/\b(?:neste\s+)?fim\s+de\s+semana\b/.test(text)) {
+    return nextCivilDateForWeekday(today, "SA", false);
+  }
+
+  return matchNumericOrNamedDate(text, today);
+}
+
+function matchNumericOrNamedDate(text: string, today: string): string | null {
+  const iso = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  if (iso) {
+    return civilFromParts(iso[1], iso[2], iso[3]);
+  }
+
+  const br = text.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
+  if (br) {
+    const year = br[3] ? expandYear(br[3], today) : today.slice(0, 4);
+    const date = civilFromParts(year, br[2], br[1]);
+    if (date && !br[3] && date < today) {
+      return civilFromParts(String(Number(year) + 1), br[2], br[1]);
+    }
+    return date;
+  }
+
+  const named = text.match(
+    /\b(\d{1,2})\s+(?:de\s+)?(janeiro|jan|fevereiro|fev|marco|mar|abril|abr|maio|mai|junho|jun|julho|jul|agosto|ago|setembro|set|outubro|out|novembro|nov|dezembro|dez)\b(?:\s+(?:de\s+)?(\d{4}))?/,
+  );
+  if (named?.[1] && named[2]) {
+    const month = monthNumber(named[2]);
+    if (!month) {
+      return null;
+    }
+    const year = named[3] ?? today.slice(0, 4);
+    const date = civilFromParts(year, String(month), named[1]);
+    if (date && !named[3] && date < today) {
+      return civilFromParts(String(Number(year) + 1), String(month), named[1]);
+    }
+    return date;
+  }
+
+  return null;
+}
+
+function monthNumber(token: string): number | null {
+  for (const [pattern, month] of MONTH_PT) {
+    if (pattern.test(token)) {
+      return month;
+    }
   }
   return null;
+}
+
+function expandYear(value: string, today: string): string {
+  if (value.length === 4) {
+    return value;
+  }
+  const century = today.slice(0, 2);
+  return `${century}${value.padStart(2, "0")}`;
+}
+
+function civilFromParts(
+  yearText: string | undefined,
+  monthText: string | undefined,
+  dayText: string | undefined,
+): string | null {
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (
+    !Number.isInteger(year) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(day) ||
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31
+  ) {
+    return null;
+  }
+  const date = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const ms = Date.parse(`${date}T12:00:00-03:00`);
+  if (Number.isNaN(ms)) {
+    return null;
+  }
+  return date;
+}
+
+function matchClock(text: string): string | null {
+  if (/\bmeio[\s-]?dia\b/.test(text)) {
+    return "12:00:00";
+  }
+  if (/\bmeia[\s-]?noite\b/.test(text)) {
+    return "00:00:00";
+  }
+
+  const spoken = text.match(
+    /\b(\d{1,2})(?::(\d{2}))?\s+da\s+(manha|tarde|noite|madrugada)\b/,
+  );
+  if (spoken) {
+    const clock = padClock(
+      hourForPeriod(spoken[1], spoken[3]),
+      spoken[2] ?? "00",
+    );
+    if (clock) {
+      return clock;
+    }
+  }
+
+  const ampm = text.match(/\b(\d{1,2})(?::(\d{2}))?\s*(a\.?m\.?|p\.?m\.?)\b/);
+  if (ampm) {
+    const meridiem = ampm[3] ?? "";
+    const hour = Number(ampm[1]);
+    const adjusted =
+      meridiem.startsWith("p") && hour < 12
+        ? hour + 12
+        : meridiem.startsWith("a") && hour === 12
+          ? 0
+          : hour;
+    const clock = padClock(String(adjusted), ampm[2] ?? "00");
+    if (clock) {
+      return clock;
+    }
+  }
+
+  const compact = text.match(/(?:^|[^\w])(?:as|@)\s*(\d{2})(\d{2})\b/);
+  if (compact) {
+    const clock = padClock(compact[1], compact[2]);
+    if (clock) {
+      return clock;
+    }
+  }
+
+  const withMinutes = text.match(/\b(\d{1,2})[:h](\d{2})\b/);
+  if (withMinutes) {
+    const clock = padClock(withMinutes[1], withMinutes[2]);
+    if (clock) {
+      return clock;
+    }
+  }
+
+  const hourWord = text.match(/\b(\d{1,2})\s*h(?:oras?)?\b/);
+  if (hourWord) {
+    const clock = padClock(hourWord[1], "00");
+    if (clock) {
+      return clock;
+    }
+  }
+
+  const asHour = text.match(/(?:^|[^\w])(?:as|@)\s*(\d{1,2})(?!\d)/);
+  if (asHour) {
+    const clock = padClock(asHour[1], "00");
+    if (clock) {
+      return clock;
+    }
+  }
+
+  if (/\b(?:de|pela|a)\s+manha\b/.test(text)) {
+    return "09:00:00";
+  }
+  if (/\b(?:de|pela|a)\s+tarde\b/.test(text)) {
+    return "12:00:00";
+  }
+  if (/\b(?:de|pela|a)\s+noite\b/.test(text)) {
+    return "19:00:00";
+  }
+
+  return null;
+}
+
+function hourForPeriod(
+  hourText: string | undefined,
+  period: string | undefined,
+): string | undefined {
+  const hour = Number(hourText);
+  if (!Number.isInteger(hour)) {
+    return hourText;
+  }
+  if ((period === "tarde" || period === "noite") && hour > 0 && hour < 12) {
+    return String(hour + 12);
+  }
+  if (period === "noite" && hour === 12) {
+    return "0";
+  }
+  return hourText;
 }
 
 function padClock(hourText: string | undefined, minuteText: string | undefined): string | null {
@@ -185,12 +437,21 @@ function padClock(hourText: string | undefined, minuteText: string | undefined):
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`;
 }
 
-function nextCivilDateForWeekday(today: string, weekday: WeekdayCode): string {
-  const delta =
-    (WEEKDAY_CODES.indexOf(weekday) -
-      WEEKDAY_CODES.indexOf(weekdayCode(today)) +
-      7) %
-    7;
+function nextCivilDateForWeekday(
+  today: string,
+  weekday: WeekdayCode,
+  skipThisWeek = false,
+): string {
+  const todayIndex = WEEKDAY_CODES.indexOf(weekdayCode(today));
+  const wantIndex = WEEKDAY_CODES.indexOf(weekday);
+  let delta = (wantIndex - todayIndex + 7) % 7;
+  if (skipThisWeek) {
+    if (wantIndex > todayIndex) {
+      delta += 7;
+    } else if (delta === 0) {
+      delta = 7;
+    }
+  }
   return addCivilDays(today, delta);
 }
 
