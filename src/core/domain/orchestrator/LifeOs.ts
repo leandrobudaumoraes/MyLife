@@ -5,9 +5,7 @@ import { inject, injectable } from "inversify";
 import { civilDateNow } from "../clock.js";
 import { err, ok, type Result } from "../result.js";
 import {
-  InboxRunSchema,
   SmokeCheckSchema,
-  type InboxRun,
   type IntegrationConfig,
   type SmokeCheck,
 } from "../schemas.js";
@@ -17,11 +15,9 @@ import type { NotionPort } from "../../ports/NotionPort.js";
 import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { TOKENS } from "../../ports/tokens.js";
 import { createLifeOsGraph } from "./LifeOsGraph.js";
-import { ensureGtd } from "../gtd/ensure.js";
-import { processInbox } from "../gtd/processInbox.js";
 
 /**
- * Fachada do Life OS: ensure GTD, Inbox (inclui Event com histórico no PARA) e avanço de projetos ociosos.
+ * Fachada do Life OS: smoke check das integrações. Sem regras de produto.
  */
 @injectable()
 export class LifeOs {
@@ -33,28 +29,8 @@ export class LifeOs {
     @inject(TOKENS.Config) private readonly config: IntegrationConfig,
   ) {}
 
-  async run(): Promise<Result<InboxRun>> {
-    const ensured = await ensureGtd(this.todoist);
-    if (!ensured.ok) {
-      return ensured;
-    }
-
-    const processed = await processInbox({
-      todoist: this.todoist,
-      notion: this.notion,
-      llm: this.llm,
-      calendar: this.calendar,
-      calendarId: this.config.googleCalendarId,
-      tree: ensured.value.tree,
-      labelsCreated: ensured.value.labelsCreated,
-      filtersCreated: ensured.value.filtersCreated,
-      projectsCreated: ensured.value.projectsCreated,
-    });
-    if (!processed.ok) {
-      return processed;
-    }
-
-    return ok(InboxRunSchema.parse(processed.value));
+  async run(): Promise<Result<SmokeCheck>> {
+    return this.smokeCheck();
   }
 
   async smokeCheck(): Promise<Result<SmokeCheck>> {

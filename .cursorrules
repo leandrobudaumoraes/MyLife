@@ -16,5 +16,5 @@ Este repositório é o **Life OS** do Leandro: um sistema em **Node.js** e **Typ
 - Hexágono: `src/core` (domínio + portas + grafo) → `src/adapters/apis` → `src/infrastructure/di`.
 - Entrada: `src/test-run.ts` e `src/index.ts` (wrapper `src/run-life.sh`).
 - Cada adaptador implementa uma porta. Testes mockam portas, não HTTP.
-- Contrato em construção: `/docs/specs`. Não implementar regra que a spec ainda marca como rascunho ou decisão em aberto.
+- Contrato em construção: `/docs/specs`. Sem spec alinhada = sem regra de produto (Todoist, Notion, Calendar). Não implementar fluxo até a spec correspondente deixar de ser rascunho.
 - Idioma do produto e das specs: português (Brasil). Identificadores de código: inglês.

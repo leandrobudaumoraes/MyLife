@@ -2,7 +2,7 @@
 
 Esqueleto Node.js / TypeScript para orquestrar **Todoist**, **Notion**, **Google Calendar** e um **LLM** (LangChain + LangGraph).
 
-Não há regras de série canônica do Protocolo de Agenda nesta corrida. O contrato está em [`docs/specs`](docs/specs): a primeira nota é o [fluxo Todoist](docs/specs/01-todoist-fluxo.md).
+Não há regras de produto nesta corrida: nenhuma árvore GTD, nenhum fluxo de Inbox, nenhum kanban Notion, nenhuma série de agenda. O contrato volta a viver em [`docs/specs`](docs/specs) quando as notas saírem de rascunho.
 
 ---
 
@@ -23,7 +23,7 @@ Ou o wrapper de cron:
 bash src/run-life.sh
 ```
 
-A corrida **materializa o GTD** (projetos, o catálogo de etiquetas — inclusive `Event` e `Pending` — e o filtro `Pendentes`), processa a Inbox (`Next` / `Maybe` / `Archive` / `Project` / `Event`) e, se um PARA no Todoist ficou vazio (tarefa concluída lá), fecha a `DOING` no Notion e sobe a próxima. `Event` grava a página no `Histórico de eventos` do projeto Notion e o cue no Calendar. Lock em `/tmp/life-os-daily-{date}.lock` impede segunda corrida no mesmo dia (`LIFE_OS_FORCE=1` reabre).
+A corrida faz **smoke check** das quatro integrações (lista projetos Todoist, páginas Notion, eventos do dia no Calendar, um ping no LLM + grafo LangGraph). Não cria etiqueta, projeto, filtro, página nem compromisso. Lock em `/tmp/life-os-daily-{date}.lock` impede segunda corrida no mesmo dia (`LIFE_OS_FORCE=1` reabre).
 
 | Script | Situação |
 |---|---|

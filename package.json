@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/core/domain/result.test.ts src/infrastructure/daily-lock.test.ts src/core/domain/gtd/routing.test.ts src/core/domain/gtd/projectPlan.test.ts src/core/domain/gtd/eventPlan.test.ts src/core/domain/gtd/ensure.test.ts src/core/domain/gtd/processInbox.test.ts",
+    "test": "tsx --test src/core/domain/result.test.ts src/infrastructure/daily-lock.test.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js"
   },
