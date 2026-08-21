@@ -5,9 +5,11 @@ import type {
   CreateTodoistProjectInput,
   CreateTodoistTaskInput,
   ListTasksQuery,
+  TodoistComment,
   TodoistFilter,
   TodoistLabel,
   TodoistProject,
+  TodoistReminder,
   TodoistTask,
   UpdateTodoistTaskPatch,
 } from "../domain/schemas.js";
@@ -18,8 +20,14 @@ import type {
 export interface TodoistPort {
   listTasks(query?: ListTasksQuery): Promise<Result<readonly TodoistTask[]>>;
   getTask(id: string): Promise<Result<TodoistTask>>;
-  listTaskComments(taskId: string): Promise<Result<readonly string[]>>;
+  listTaskComments(
+    taskId: string,
+  ): Promise<Result<readonly TodoistComment[]>>;
+  listTaskReminders(
+    taskId: string,
+  ): Promise<Result<readonly TodoistReminder[]>>;
   addTaskComment(taskId: string, content: string): Promise<Result<void>>;
+  deleteTask(id: string): Promise<Result<void>>;
   updateTask(
     id: string,
     patch: UpdateTodoistTaskPatch,

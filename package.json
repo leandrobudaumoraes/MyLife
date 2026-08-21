@@ -10,7 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tsx --test src/core/domain/result.test.ts src/infrastructure/daily-lock.test.ts",
+    "test": "tsx --test src/core/domain/result.test.ts src/core/domain/clock.test.ts src/core/domain/inbox-event/due.test.ts src/core/domain/inbox-event/recurrence.test.ts src/core/domain/inbox-event/links.test.ts src/core/domain/inbox-event/conflict.test.ts src/core/domain/inbox-event/reminders.test.ts src/core/domain/inbox-event/processInboxEvents.test.ts src/infrastructure/daily-lock.test.ts",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js"
   },

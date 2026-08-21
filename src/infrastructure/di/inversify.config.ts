@@ -3,6 +3,7 @@ import "reflect-metadata";
 import { Container } from "inversify";
 
 import { LifeOs } from "../../core/domain/orchestrator/LifeOs.js";
+import { ProcessInboxEvents } from "../../core/domain/inbox-event/processInboxEvents.js";
 import {
   IntegrationConfigSchema,
   type IntegrationConfig,
@@ -23,6 +24,8 @@ export function loadIntegrationConfig(
   return IntegrationConfigSchema.parse({
     todoistToken: env.TODOIST_API_TOKEN ?? "mock-todoist-token",
     notionApiKey: env.NOTION_API_KEY ?? "mock-notion-token",
+    notionUpcomingEventsDbId:
+      env.NOTION_UPCOMING_EVENTS_DB_ID ?? "upcoming-events-mock",
     googleCalendarId: env.GOOGLE_CALENDAR_ID ?? "primary",
     googleCalendarInstitutoId:
       env.GOOGLE_CALENDAR_INSTITUTO_ID ?? "instituto-mock",
@@ -39,6 +42,7 @@ export function createContainer(
   container.bind<NotionPort>(TOKENS.Notion).to(NotionAdapter);
   container.bind<CalendarPort>(TOKENS.GoogleCalendar).to(CalendarAdapter);
   container.bind<LlmPort>(TOKENS.Llm).to(OpenAiAdapter);
+  container.bind(ProcessInboxEvents).toSelf();
   container.bind(LifeOs).toSelf();
 
   return container;

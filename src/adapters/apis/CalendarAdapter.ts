@@ -3,7 +3,11 @@ import "reflect-metadata";
 import { google, type calendar_v3 } from "googleapis";
 import { inject, injectable } from "inversify";
 
-import { civilDayBounds } from "../../core/domain/clock.js";
+import {
+  civilDayBounds,
+  civilIsoFromGoogleDateTime,
+  toCivilIso,
+} from "../../core/domain/clock.js";
 import { err, ok, type Result } from "../../core/domain/result.js";
 import {
   CalendarEventSchema,
@@ -100,6 +104,15 @@ export class CalendarAdapter implements CalendarPort {
       }
       if (input.recurrence) {
         requestBody.recurrence = [toRrule(input.recurrence)];
+      }
+      if (input.reminders && input.reminders.length > 0) {
+        requestBody.reminders = {
+          useDefault: false,
+          overrides: input.reminders.map((reminder) => ({
+            method: reminder.method,
+            minutes: reminder.minutes,
+          })),
+        };
       }
 
       const eventId = input.eventId ?? undefined;
@@ -206,6 +219,7 @@ export class CalendarAdapter implements CalendarPort {
       range,
       htmlLink: event.htmlLink ?? null,
       allDay: Boolean(event.start?.date && !event.start.dateTime),
+      description: event.description ?? null,
     });
   }
 
@@ -260,6 +274,9 @@ function toRrule(recurrence: EventRecurrence): string {
   if (recurrence.freq === "WEEKLY" && recurrence.byDay.length > 0) {
     parts.push(`BYDAY=${recurrence.byDay.join(",")}`);
   }
+  if (recurrence.freq === "MONTHLY" && recurrence.byMonthDay) {
+    parts.push(`BYMONTHDAY=${recurrence.byMonthDay}`);
+  }
   if (recurrence.until) {
     parts.push(`UNTIL=${recurrence.until.replaceAll("-", "")}`);
   }
@@ -267,16 +284,27 @@ function toRrule(recurrence: EventRecurrence): string {
 }
 
 function rangeOf(event: calendar_v3.Schema$Event): TimeRange | null {
-  const start =
-    event.start?.dateTime ??
-    (event.start?.date ? `${event.start.date}T00:00:00-03:00` : null);
-  const end =
-    event.end?.dateTime ??
-    (event.end?.date ? `${event.end.date}T00:00:00-03:00` : null);
-  if (!start || !end) {
+  const startIso = googleWhenToIso(event.start);
+  const endIso = googleWhenToIso(event.end);
+  if (!startIso || !endIso) {
     return null;
   }
-  return { start: { iso: start }, end: { iso: end } };
+  return { start: { iso: startIso }, end: { iso: endIso } };
+}
+
+function googleWhenToIso(
+  when: calendar_v3.Schema$EventDateTime | undefined,
+): string | null {
+  if (!when) {
+    return null;
+  }
+  if (when.dateTime) {
+    return civilIsoFromGoogleDateTime(when.dateTime, when.timeZone);
+  }
+  if (when.date) {
+    return toCivilIso(`${when.date}T00:00:00-03:00`);
+  }
+  return null;
 }
 
 function mapGoogleError(cause: unknown): IntegrationError {

@@ -2,10 +2,12 @@ import "reflect-metadata";
 
 import { inject, injectable } from "inversify";
 
+import { ProcessInboxEvents } from "../inbox-event/processInboxEvents.js";
 import { civilDateNow } from "../clock.js";
 import { err, ok, type Result } from "../result.js";
 import {
   SmokeCheckSchema,
+  type InboxEventRun,
   type IntegrationConfig,
   type SmokeCheck,
 } from "../schemas.js";
@@ -14,11 +16,8 @@ import type { LlmPort } from "../../ports/LlmPort.js";
 import type { NotionPort } from "../../ports/NotionPort.js";
 import type { TodoistPort } from "../../ports/TodoistPort.js";
 import { TOKENS } from "../../ports/tokens.js";
-import { createLifeOsGraph } from "./LifeOsGraph.js";
+import { createInboxEventGraph, createLifeOsGraph } from "./LifeOsGraph.js";
 
-/**
- * Fachada do Life OS: smoke check das integrações. Sem regras de produto.
- */
 @injectable()
 export class LifeOs {
   constructor(
@@ -27,10 +26,14 @@ export class LifeOs {
     @inject(TOKENS.GoogleCalendar) private readonly calendar: CalendarPort,
     @inject(TOKENS.Llm) private readonly llm: LlmPort,
     @inject(TOKENS.Config) private readonly config: IntegrationConfig,
+    @inject(ProcessInboxEvents)
+    private readonly inboxEvents: ProcessInboxEvents,
   ) {}
 
-  async run(): Promise<Result<SmokeCheck>> {
-    return this.smokeCheck();
+  async run(): Promise<Result<InboxEventRun>> {
+    const graph = createInboxEventGraph(this.inboxEvents);
+    const state = await graph.invoke({});
+    return state.result;
   }
 
   async smokeCheck(): Promise<Result<SmokeCheck>> {

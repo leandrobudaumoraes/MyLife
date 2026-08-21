@@ -10,6 +10,7 @@ import {
   type ColorKey,
   type GetTasksArgs,
   type PersonalProject,
+  type Reminder,
   type Task,
   type WorkspaceProject,
 } from "@doist/todoist-sdk";
@@ -17,9 +18,11 @@ import { inject, injectable } from "inversify";
 
 import { err, ok, type Result } from "../../core/domain/result.js";
 import {
+  TodoistCommentSchema,
   TodoistFilterSchema,
   TodoistLabelSchema,
   TodoistProjectSchema,
+  TodoistReminderSchema,
   TodoistTaskSchema,
   type CreateTodoistFilterInput,
   type CreateTodoistLabelInput,
@@ -28,9 +31,11 @@ import {
   type IntegrationConfig,
   type IntegrationError,
   type ListTasksQuery,
+  type TodoistComment,
   type TodoistFilter,
   type TodoistLabel,
   type TodoistProject,
+  type TodoistReminder,
   type TodoistTask,
   type UpdateTodoistTaskPatch,
 } from "../../core/domain/schemas.js";
@@ -93,6 +98,23 @@ export class TodoistAdapter implements TodoistPort {
         return await this.getTask(id);
       } catch (cause: unknown) {
         return this.fail("updateTaskDue", started, cause);
+      }
+    });
+  }
+
+  async deleteTask(id: string): Promise<Result<void>> {
+    return this.enqueueWrite(async () => {
+      const started = Date.now();
+      try {
+        await this.withRetry(() => this.client.deleteTask(id));
+        console.log("[TodoistAdapter.deleteTask]", {
+          ok: true,
+          durationMs: Date.now() - started,
+          id,
+        });
+        return ok(undefined);
+      } catch (cause: unknown) {
+        return this.fail("deleteTask", started, cause);
       }
     });
   }
@@ -308,10 +330,12 @@ export class TodoistAdapter implements TodoistPort {
     });
   }
 
-  async listTaskComments(taskId: string): Promise<Result<readonly string[]>> {
+  async listTaskComments(
+    taskId: string,
+  ): Promise<Result<readonly TodoistComment[]>> {
     const started = Date.now();
     try {
-      const comments: string[] = [];
+      const comments: TodoistComment[] = [];
       let cursor: string | null = null;
       do {
         const page = await this.withRetry(() =>
@@ -321,7 +345,21 @@ export class TodoistAdapter implements TodoistPort {
               : { taskId, limit: 200 },
           ),
         );
-        comments.push(...page.results.map((comment) => comment.content));
+        comments.push(
+          ...page.results.map((comment) =>
+            TodoistCommentSchema.parse({
+              content: comment.content,
+              attachmentName:
+                comment.fileAttachment?.fileName ??
+                comment.fileAttachment?.title ??
+                null,
+              attachmentUrl:
+                comment.fileAttachment?.fileUrl ??
+                comment.fileAttachment?.url ??
+                null,
+            }),
+          ),
+        );
         cursor = page.nextCursor;
       } while (cursor);
       console.log("[TodoistAdapter.listTaskComments]", {
@@ -333,6 +371,41 @@ export class TodoistAdapter implements TodoistPort {
       return ok(comments);
     } catch (cause: unknown) {
       return this.fail("listTaskComments", started, cause);
+    }
+  }
+
+  async listTaskReminders(
+    taskId: string,
+  ): Promise<Result<readonly TodoistReminder[]>> {
+    const started = Date.now();
+    try {
+      const reminders: TodoistReminder[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await this.withRetry(() =>
+          this.client.getReminders(
+            cursor
+              ? { taskId, cursor, limit: 200 }
+              : { taskId, limit: 200 },
+          ),
+        );
+        reminders.push(
+          ...page.results.flatMap((reminder) => {
+            const mapped = toReminder(reminder);
+            return mapped ? [mapped] : [];
+          }),
+        );
+        cursor = page.nextCursor;
+      } while (cursor);
+      console.log("[TodoistAdapter.listTaskReminders]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        taskId,
+        count: reminders.length,
+      });
+      return ok(reminders);
+    } catch (cause: unknown) {
+      return this.fail("listTaskReminders", started, cause);
     }
   }
 
@@ -528,9 +601,62 @@ function toTask(task: Task): TodoistTask {
     labels: task.labels,
     dueDate: task.due?.date ?? null,
     dueDatetime: task.due?.datetime ?? null,
+    dueString: task.due?.string ?? null,
+    isRecurring: task.due?.isRecurring ?? false,
+    priority: task.priority,
+    durationMinutes:
+      task.duration?.unit === "minute" && task.duration.amount > 0
+        ? task.duration.amount
+        : null,
     isCompleted: task.checked,
     url: task.url,
   });
+}
+
+function toReminder(reminder: Reminder): TodoistReminder | null {
+  if (reminder.isDeleted || reminder.type === "location") {
+    return null;
+  }
+  const dueDatetime =
+    reminder.type === "absolute" || reminder.type === "relative"
+      ? dueDatetimeOf(reminder)
+      : null;
+  const minuteOffset =
+    reminder.type === "relative" ? reminder.minuteOffset : null;
+  return TodoistReminderSchema.parse({
+    type: reminder.type,
+    minuteOffset,
+    dueDatetime,
+    service: reminderService(reminder),
+  });
+}
+
+function dueDatetimeOf(reminder: Reminder): string | null {
+  if (reminder.type !== "absolute" && reminder.type !== "relative") {
+    return null;
+  }
+  const due = reminder.due;
+  if (!due) {
+    return null;
+  }
+  if (due.datetime && due.datetime.includes("T")) {
+    return due.datetime;
+  }
+  if (due.date.includes("T")) {
+    return due.date;
+  }
+  return null;
+}
+
+function reminderService(reminder: Reminder): "push" | "email" | null {
+  if (!("service" in reminder)) {
+    return null;
+  }
+  const service = reminder.service;
+  if (service === "email" || service === "push") {
+    return service;
+  }
+  return null;
 }
 
 function isInboxProject(project: PersonalProject | WorkspaceProject): boolean {

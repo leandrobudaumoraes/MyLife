@@ -13,13 +13,22 @@ import {
 } from "@notionhq/client";
 import { inject, injectable } from "inversify";
 
+import { sameInstant, toNotionWallClock } from "../../core/domain/clock.js";
+import {
+  calendarEventLink,
+  googleEventIdFromUrl,
+} from "../../core/domain/inbox-event/links.js";
 import { err, ok, type Result } from "../../core/domain/result.js";
 import {
   NotionPageSchema,
+  TIME_ZONE,
+  UpcomingEventRecordSchema,
   type IntegrationConfig,
   type IntegrationError,
   type NotionPage,
+  type UpcomingEventRecord,
   type UpsertChildPageInput,
+  type UpsertUpcomingEventInput,
 } from "../../core/domain/schemas.js";
 import type { NotionPort } from "../../core/ports/NotionPort.js";
 import { TOKENS } from "../../core/ports/tokens.js";
@@ -27,13 +36,16 @@ import { TOKENS } from "../../core/ports/tokens.js";
 @injectable()
 export class NotionAdapter implements NotionPort {
   private readonly client: Client;
+  private readonly upcomingEventsDbId: string;
   private projectsDataSourceId: string | null = null;
+  private upcomingEventsDataSourceId: string | null = null;
 
   constructor(@inject(TOKENS.Config) config: IntegrationConfig) {
     this.client = new Client({
       auth: config.notionApiKey,
       timeoutMs: 15_000,
     });
+    this.upcomingEventsDbId = config.notionUpcomingEventsDbId;
   }
 
   async listDatabasePages(): Promise<Result<readonly NotionPage[]>> {
@@ -126,6 +138,170 @@ export class NotionAdapter implements NotionPort {
     }
   }
 
+  async upsertUpcomingEvent(
+    input: UpsertUpcomingEventInput,
+  ): Promise<Result<UpcomingEventRecord>> {
+    const started = Date.now();
+    try {
+      const dataSourceId = await this.resolveUpcomingEventsDataSourceId();
+      const existing = input.pageId
+        ? null
+        : await this.findUpcomingEvent(
+            dataSourceId,
+            input.title,
+            input.startIso,
+          );
+      const calendarEventId =
+        input.calendarEventId ?? existing?.calendarEventId ?? null;
+      const calendarHtmlLink =
+        input.calendarHtmlLink ??
+        existing?.calendarHtmlLink ??
+        (calendarEventId ? calendarEventLink(null, calendarEventId) : null);
+      const pageId = input.pageId
+        ? await this.updateUpcomingEventPage(input.pageId, {
+            ...input,
+            calendarEventId,
+            calendarHtmlLink,
+          })
+        : existing
+          ? await this.updateUpcomingEventPage(existing.pageId, {
+              ...input,
+              calendarEventId,
+              calendarHtmlLink,
+            })
+          : await this.createUpcomingEventPage(dataSourceId, {
+              ...input,
+              calendarEventId,
+              calendarHtmlLink,
+            });
+      const record = UpcomingEventRecordSchema.parse({
+        pageId,
+        title: input.title,
+        url: notionPageUrl(pageId),
+        calendarEventId,
+        calendarHtmlLink,
+      });
+      console.log("[NotionAdapter.upsertUpcomingEvent]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        pageId,
+      });
+      return ok(record);
+    } catch (cause: unknown) {
+      return this.fail("upsertUpcomingEvent", started, cause);
+    }
+  }
+
+  async archiveUpcomingEvent(pageId: string): Promise<Result<void>> {
+    const started = Date.now();
+    try {
+      await this.client.pages.update({
+        page_id: pageId,
+        in_trash: true,
+      });
+      console.log("[NotionAdapter.archiveUpcomingEvent]", {
+        ok: true,
+        durationMs: Date.now() - started,
+        pageId,
+      });
+      return ok(undefined);
+    } catch (cause: unknown) {
+      const error = mapNotionError(cause);
+      if (error.code === "not_found") {
+        return ok(undefined);
+      }
+      console.log("[NotionAdapter]", {
+        operation: "archiveUpcomingEvent",
+        ok: false,
+        durationMs: Date.now() - started,
+        code: error.code,
+      });
+      return err(error);
+    }
+  }
+
+  private async resolveUpcomingEventsDataSourceId(): Promise<string> {
+    if (this.upcomingEventsDataSourceId) {
+      return this.upcomingEventsDataSourceId;
+    }
+
+    const databaseId = requireUpcomingEventsDbId(this.upcomingEventsDbId);
+    const database = await this.client.databases.retrieve({
+      database_id: databaseId,
+    });
+    if (isFullDatabase(database) && database.is_inline !== true) {
+      await this.client.databases.update({
+        database_id: databaseId,
+        is_inline: true,
+      });
+    }
+    const source = isFullDatabase(database)
+      ? database.data_sources[0]
+      : undefined;
+    if (!source) {
+      throw new Error(
+        `NOTION_UPCOMING_EVENTS_DB_ID (${databaseId}) não retornou data source.`,
+      );
+    }
+
+    this.upcomingEventsDataSourceId = source.id;
+    return source.id;
+  }
+
+  private async findUpcomingEvent(
+    dataSourceId: string,
+    title: string,
+    startIso: string,
+  ): Promise<UpcomingEventRecord | null> {
+    const response = await this.client.dataSources.query({
+      data_source_id: dataSourceId,
+      page_size: 20,
+      filter: {
+        property: "Nome",
+        title: { equals: title },
+      },
+    });
+    const page = response.results.find(
+      (result) =>
+        isFullPage(result) && sameInstant(readDateStart(result, "Quando"), startIso),
+    );
+    if (!page || !isFullPage(page)) {
+      return null;
+    }
+    const calendarHtmlLink = readUrl(page, "CalendarEventId");
+    return UpcomingEventRecordSchema.parse({
+      pageId: page.id,
+      title: readAnyTitle(page),
+      url: notionPageUrl(page.id),
+      calendarEventId: googleEventIdFromUrl(calendarHtmlLink),
+      calendarHtmlLink,
+    });
+  }
+
+  private async createUpcomingEventPage(
+    dataSourceId: string,
+    input: UpsertUpcomingEventInput,
+  ): Promise<string> {
+    const created = await this.client.pages.create({
+      parent: { data_source_id: dataSourceId },
+      properties: upcomingEventProperties(input),
+      markdown: input.markdown,
+    });
+    return created.id;
+  }
+
+  private async updateUpcomingEventPage(
+    pageId: string,
+    input: UpsertUpcomingEventInput,
+  ): Promise<string> {
+    await this.client.pages.update({
+      page_id: pageId,
+      properties: upcomingEventProperties(input),
+    });
+    await this.replaceMarkdown(pageId, input.markdown);
+    return pageId;
+  }
+
   private async resolveProjectsDataSourceId(): Promise<string> {
     if (this.projectsDataSourceId) {
       return this.projectsDataSourceId;
@@ -213,6 +389,69 @@ export class NotionAdapter implements NotionPort {
     });
     return err(error);
   }
+}
+
+function requireUpcomingEventsDbId(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    throw new Error(
+      "NOTION_UPCOMING_EVENTS_DB_ID não está definida no .env. Defina o ID do banco Próximos eventos.",
+    );
+  }
+
+  const databaseId = extractDatabaseId(trimmed);
+  if (!databaseId) {
+    throw new Error(
+      "NOTION_UPCOMING_EVENTS_DB_ID no .env não é um ID de banco Notion válido.",
+    );
+  }
+
+  return databaseId;
+}
+
+function upcomingEventProperties(
+  input: UpsertUpcomingEventInput,
+): {
+  Nome: { title: Array<{ type: "text"; text: { content: string } }> };
+  Quando: { date: { start: string; time_zone: typeof TIME_ZONE } };
+  Recorrência: {
+    rich_text: Array<{ type: "text"; text: { content: string } }>;
+  };
+  CalendarEventId: { url: string | null };
+} {
+  const calendarLink =
+    input.calendarHtmlLink ??
+    (input.calendarEventId
+      ? calendarEventLink(null, input.calendarEventId)
+      : null);
+  return {
+    Nome: { title: [richText(input.title)] },
+    Quando: {
+      date: { start: toNotionWallClock(input.startIso), time_zone: TIME_ZONE },
+    },
+    Recorrência: { rich_text: [richText(input.recurrenceLabel ?? "")] },
+    CalendarEventId: { url: calendarLink },
+  };
+}
+
+function richText(content: string): { type: "text"; text: { content: string } } {
+  return { type: "text", text: { content: content.slice(0, 2000) } };
+}
+
+function readUrl(page: PageObjectResponse, name: string): string | null {
+  const property = page.properties[name];
+  if (!property || property.type !== "url") {
+    return null;
+  }
+  return property.url;
+}
+
+function readDateStart(page: PageObjectResponse, name: string): string | null {
+  const property = page.properties[name];
+  if (!property || property.type !== "date") {
+    return null;
+  }
+  return property.date?.start ?? null;
 }
 
 function requireNotionProjectsDbId(): string {

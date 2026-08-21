@@ -22,10 +22,29 @@ export const TodoistTaskSchema = z.object({
   labels: z.array(z.string()),
   dueDate: z.string().nullable(),
   dueDatetime: z.string().nullable(),
+  dueString: z.string().nullable(),
+  isRecurring: z.boolean(),
+  priority: z.number().int(),
+  durationMinutes: z.number().int().positive().nullable(),
   isCompleted: z.boolean(),
   url: z.string(),
 });
 export type TodoistTask = z.infer<typeof TodoistTaskSchema>;
+
+export const TodoistCommentSchema = z.object({
+  content: z.string(),
+  attachmentName: z.string().nullable(),
+  attachmentUrl: z.string().nullable(),
+});
+export type TodoistComment = z.infer<typeof TodoistCommentSchema>;
+
+export const TodoistReminderSchema = z.object({
+  type: z.enum(["relative", "absolute"]),
+  minuteOffset: z.number().int().nullable(),
+  dueDatetime: z.string().nullable(),
+  service: z.enum(["push", "email"]).nullable(),
+});
+export type TodoistReminder = z.infer<typeof TodoistReminderSchema>;
 
 export const TodoistProjectSchema = z.object({
   id: z.string(),
@@ -107,6 +126,28 @@ export const UpsertChildPageInputSchema = z.object({
 });
 export type UpsertChildPageInput = z.infer<typeof UpsertChildPageInputSchema>;
 
+export const UpcomingEventRecordSchema = z.object({
+  pageId: z.string(),
+  title: z.string(),
+  url: z.string(),
+  calendarEventId: z.string().nullable(),
+  calendarHtmlLink: z.string().nullable(),
+});
+export type UpcomingEventRecord = z.infer<typeof UpcomingEventRecordSchema>;
+
+export const UpsertUpcomingEventInputSchema = z.object({
+  pageId: z.string().nullable(),
+  title: z.string(),
+  startIso: z.string(),
+  recurrenceLabel: z.string().nullable(),
+  markdown: z.string(),
+  calendarEventId: z.string().nullable(),
+  calendarHtmlLink: z.string().nullable(),
+});
+export type UpsertUpcomingEventInput = z.infer<
+  typeof UpsertUpcomingEventInputSchema
+>;
+
 export const CalendarEventSchema = z.object({
   eventId: z.string(),
   calendarId: z.string(),
@@ -114,6 +155,7 @@ export const CalendarEventSchema = z.object({
   range: TimeRangeSchema,
   htmlLink: z.string().nullable(),
   allDay: z.boolean(),
+  description: z.string().nullable(),
 });
 export type CalendarEvent = z.infer<typeof CalendarEventSchema>;
 
@@ -142,9 +184,16 @@ export const EventRecurrenceSchema = z.object({
   freq: EventRecurrenceFreqSchema,
   interval: z.number().int().positive().default(1),
   byDay: z.array(WeekdayCodeSchema).default([]),
+  byMonthDay: z.number().int().min(1).max(31).nullable().default(null),
   until: z.string().nullable().default(null),
 });
 export type EventRecurrence = z.infer<typeof EventRecurrenceSchema>;
+
+export const CalendarReminderSchema = z.object({
+  method: z.enum(["popup", "email"]),
+  minutes: z.number().int().nonnegative(),
+});
+export type CalendarReminder = z.infer<typeof CalendarReminderSchema>;
 
 export const UpsertEventInputSchema = z.object({
   eventId: z.string().nullable(),
@@ -153,6 +202,7 @@ export const UpsertEventInputSchema = z.object({
   range: TimeRangeSchema,
   description: z.string().nullable(),
   recurrence: EventRecurrenceSchema.nullable(),
+  reminders: z.array(CalendarReminderSchema).nullable(),
 });
 export type UpsertEventInput = z.infer<typeof UpsertEventInputSchema>;
 
@@ -195,6 +245,7 @@ export type IntegrationError = z.infer<typeof IntegrationErrorSchema>;
 export const IntegrationConfigSchema = z.object({
   todoistToken: z.string(),
   notionApiKey: z.string(),
+  notionUpcomingEventsDbId: z.string(),
   googleCalendarId: z.string(),
   googleCalendarInstitutoId: z.string(),
 });
@@ -208,3 +259,32 @@ export const SmokeCheckSchema = z.object({
   graphReply: z.string(),
 });
 export type SmokeCheck = z.infer<typeof SmokeCheckSchema>;
+
+export const InboxEventOutcomeSchema = z.discriminatedUnion("status", [
+  z.object({
+    taskId: z.string(),
+    status: z.literal("promoted"),
+    notionUrl: z.string(),
+    eventId: z.string(),
+  }),
+  z.object({
+    taskId: z.string(),
+    status: z.literal("pendencia"),
+    reason: z.string(),
+  }),
+  z.object({
+    taskId: z.string(),
+    status: z.literal("failed"),
+    message: z.string(),
+  }),
+]);
+export type InboxEventOutcome = z.infer<typeof InboxEventOutcomeSchema>;
+
+export const InboxEventRunSchema = z.object({
+  scanned: z.number().int().nonnegative(),
+  promoted: z.number().int().nonnegative(),
+  pending: z.number().int().nonnegative(),
+  failed: z.number().int().nonnegative(),
+  outcomes: z.array(InboxEventOutcomeSchema),
+});
+export type InboxEventRun = z.infer<typeof InboxEventRunSchema>;

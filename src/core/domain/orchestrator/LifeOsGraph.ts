@@ -1,6 +1,9 @@
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
 
 import type { LlmPort } from "../../ports/LlmPort.js";
+import type { ProcessInboxEvents } from "../inbox-event/processInboxEvents.js";
+import { ok, type Result } from "../result.js";
+import type { InboxEventRun } from "../schemas.js";
 
 export const AgentStateAnnotation = Annotation.Root({
   prompt: Annotation<string>,
@@ -10,8 +13,8 @@ export const AgentStateAnnotation = Annotation.Root({
 type GraphState = typeof AgentStateAnnotation.State;
 
 /**
- * Grafo mínimo: um nó de raciocínio. Sem regras de negócio.
- * Novos agentes entram como nós daqui.
+ * Grafo mínimo de ping do LLM. O fluxo de produto Inbox Event vive em
+ * `createInboxEventGraph`.
  */
 export function createLifeOsGraph(llm: LlmPort) {
   return new StateGraph(AgentStateAnnotation)
@@ -27,4 +30,29 @@ export function createLifeOsGraph(llm: LlmPort) {
     .compile();
 }
 
+export const InboxEventGraphState = Annotation.Root({
+  result: Annotation<Result<InboxEventRun>>({
+    reducer: (_previous, next) => next,
+    default: () =>
+      ok({
+        scanned: 0,
+        promoted: 0,
+        pending: 0,
+        failed: 0,
+        outcomes: [],
+      }),
+  }),
+});
+
+export function createInboxEventGraph(inboxEvents: ProcessInboxEvents) {
+  return new StateGraph(InboxEventGraphState)
+    .addNode("inboxEvents", async () => ({
+      result: await inboxEvents.execute(),
+    }))
+    .addEdge(START, "inboxEvents")
+    .addEdge("inboxEvents", END)
+    .compile();
+}
+
 export type LifeOsGraph = ReturnType<typeof createLifeOsGraph>;
+export type InboxEventGraph = ReturnType<typeof createInboxEventGraph>;
